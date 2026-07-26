@@ -2,13 +2,16 @@ import React, { memo, useState, useCallback, useMemo, useEffect, type ReactNode 
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useLightboxStore } from './ImageLightbox';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFileStore } from '../../stores/fileStore';
 import { bridge } from '../../lib/tauri-bridge';
+import { rehypeKatexFix } from '../../lib/rehype-katex-fix';
 import { useT } from '../../lib/i18n';
+import 'katex/dist/katex.min.css';
 
 /* ================================================================
    AsyncImage — loads local files via Rust base64 bridge
@@ -191,7 +194,7 @@ const SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
-    '*': [...(defaultSchema.attributes?.['*'] || []), 'className'],
+    '*': [...(defaultSchema.attributes?.['*'] || []), 'className', 'style', 'ariaHidden'],
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -238,9 +241,10 @@ async function loadRemarkPlugins(): Promise<RemarkPlugin[]> {
     remarkPluginsPromise = Promise.all([
       import('remark-gfm'),
       import('remark-cjk-friendly'),
+      import('remark-math'),
     ])
-      .then(([gfmMod, cjkMod]) => {
-        cachedRemarkPlugins = [gfmMod.default, cjkMod.default];
+      .then(([gfmMod, cjkMod, mathMod]) => {
+        cachedRemarkPlugins = [gfmMod.default, cjkMod.default, mathMod.default];
         return cachedRemarkPlugins;
       })
       .catch((error) => {
@@ -254,7 +258,19 @@ async function loadRemarkPlugins(): Promise<RemarkPlugin[]> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const REHYPE_PLUGINS: any[] = [rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA], rehypeHighlight];
+// Pipeline order is critical:
+//  1. rehypeRaw       — parse raw HTML in markdown
+//  2. rehypeKatexFix  — fix common LaTeX syntax before sanitize
+//  3. rehypeSanitize   — sanitize with KaTeX-friendly schema
+//  4. rehypeHighlight — highlight code blocks (not math)
+//  5. rehypeKatex     — render KaTeX math nodes LAST
+const REHYPE_PLUGINS: any[] = [
+  rehypeRaw,
+  rehypeKatexFix,
+  [rehypeSanitize, SANITIZE_SCHEMA],
+  rehypeHighlight,
+  rehypeKatex,
+];
 
 /** Error boundary scoped to a single markdown block.
  *  A malformed message (e.g. truncated table from rate-limit) crashes only

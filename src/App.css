@@ -1345,3 +1345,35 @@ thead {
 .custom-bg-active .gradient-bg::after {
   display: none !important;
 }
+
+/* ================================================================
+   KaTeX math rendering — sizing and display style
+   (ported from vscode-cc-enhance/enhance.js lines 24-31)
+   ================================================================ */
+.katex {
+  font-size: 1.1em;
+}
+.katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+/* Dark mode: ensure KaTeX text is visible on dark backgrounds */
+.dark .katex {
+  color: var(--color-text-primary);
+}
+
+/* ================================================================
+   Code block forced wrapping — prevents horizontal scroll
+   for long command output / log lines
+   (ported from vscode-cc-enhance/enhance.js lines 93-102)
+   ================================================================ */
+pre {
+  white-space: pre-wrap !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+}
+pre code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}

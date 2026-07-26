@@ -17,6 +17,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { APP_NAME } from './lib/edition';
 import { useAgentStore } from './stores/agentStore';
 import { bridge, onFileChange } from './lib/tauri-bridge';
+import { useScrollZoom } from './lib/useScrollZoom';
 import { useT } from './lib/i18n';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
@@ -287,6 +288,9 @@ function App() {
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontSize}px`;
   }, [fontSize]);
+
+  // Ctrl/Cmd+wheel UI zoom (ported from vscode-cc-enhance)
+  useScrollZoom();
 
   // Apply font family to document root
   useEffect(() => {

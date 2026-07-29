@@ -20,7 +20,37 @@ import { bridge, onFileChange } from './lib/tauri-bridge';
 import { useScrollZoom } from './lib/useScrollZoom';
 import { useT } from './lib/i18n';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { loadClaudeUuid } from './hooks/useStreamProcessor';
 import './App.css';
+
+// --- Token state cache (survives F5 via sessionStorage) ---
+// Primary F5 recovery: fast, real-time, covers active streaming sessions.
+// JSONL (Claude native) is authoritative for historical/archived sessions.
+// On reconnect we try JSONL first; sessionStorage is the reliable fallback.
+
+const TOKEN_STATE_KEY = 'tokenicode_token_state_v2';
+
+function saveTokenState(tabId: string, meta: { inputTokens?: number; outputTokens?: number; totalInputTokens?: number; totalOutputTokens?: number }) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(TOKEN_STATE_KEY) || '{}');
+    data[tabId] = {
+      inputTokens: meta.inputTokens,
+      outputTokens: meta.outputTokens,
+      totalInputTokens: meta.totalInputTokens,
+      totalOutputTokens: meta.totalOutputTokens,
+    };
+    sessionStorage.setItem(TOKEN_STATE_KEY, JSON.stringify(data));
+  } catch {/* ignore */}
+}
+
+function loadTokenState(tabId: string): { inputTokens?: number; outputTokens?: number; totalInputTokens?: number; totalOutputTokens?: number } | null {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(TOKEN_STATE_KEY) || '{}');
+    return data[tabId] || null;
+  } catch {
+    return null;
+  }
+}
 
 /** Accent colors per theme for the slash in the icon */
 const THEME_ACCENT_COLORS: Record<ColorTheme, string> = {
@@ -148,17 +178,180 @@ function App() {
     return () => { unlisten?.(); };
   }, []);
 
-  // TK-329: On app startup (incl. browser refresh), detect and kill orphaned backend processes.
-  // After refresh, frontend state (stdinToTab, listeners) is wiped, but Rust ProcessManager
-  // may still hold live child processes. Kill any that have no corresponding frontend mapping.
+  // TK-329: On app startup (incl. browser F5 refresh), handle active backend processes.
+  // - Processes WITH stdinToTab mapping: re-register event listeners and restore streaming state
+  // - Processes WITHOUT stdinToTab mapping: kill them (orphaned, no frontend mapping)
+  // Use a ref to prevent double-run in React Strict Mode (dev only; harmless in prod)
+  const reconnectRanRef = useRef(false);
   useEffect(() => {
+    if (reconnectRanRef.current) return;
+    reconnectRanRef.current = true;
     bridge.listActiveProcesses().then((activeIds) => {
       if (!activeIds.length) return;
-      const { stdinToTab } = useSessionStore.getState();
-      const orphaned = activeIds.filter((id) => !stdinToTab[id]);
-      for (const id of orphaned) {
-        console.log('[TOKENICODE:cleanup] killing orphaned process:', id);
-        bridge.killSession(id).catch(() => {});
+      const sessionState = useSessionStore.getState();
+      const { stdinToTab } = sessionState;
+      const chatState = useChatStore.getState();
+      const agentState = useAgentStore.getState();
+
+      for (const stdinId of activeIds) {
+        const tabId = stdinToTab[stdinId];
+        if (!tabId) {
+          // Orphaned: no frontend mapping — kill it
+          console.log('[TOKENICODE:cleanup] killing orphaned process:', stdinId);
+          bridge.killSession(stdinId).catch(() => {});
+          continue;
+        }
+
+        // Reconnect: the session has a valid tab mapping
+        console.log('[TOKENICODE:reconnect] reconnecting to:', stdinId, '→ tab:', tabId);
+
+        // Ensure tab exists before setting state (tab may not exist yet at startup)
+        chatState.ensureTab(tabId);
+
+        // Mark session as running and streaming
+        chatState.setSessionStatus(tabId, 'running');
+        chatState.setSessionMeta(tabId, { stdinId });
+
+        // Restore token totals: sessionStorage first (real-time, works for active streaming),
+        // then JSONL as authoritative check (covers completed/historical sessions).
+        const cachedTokens = loadTokenState(tabId);
+        if (cachedTokens) {
+          chatState.setSessionMeta(tabId, cachedTokens);
+          console.log('[reconnect] restored tokens from cache for', tabId, cachedTokens);
+        }
+        // Background: cross-check with Claude's native JSONL for authoritative totals
+        const claudeUuid = loadClaudeUuid(tabId);
+        if (claudeUuid) {
+          bridge.getSessionTokens(claudeUuid).then((jsonlTokens) => {
+            // JSONL is authoritative; use it to correct if it has more data
+            const current = chatState.getTab(tabId)?.sessionMeta ?? {};
+            const corrected = {
+              totalInputTokens: Math.max(current.totalInputTokens ?? 0, jsonlTokens.totalInputTokens),
+              totalOutputTokens: Math.max(current.totalOutputTokens ?? 0, jsonlTokens.totalOutputTokens),
+            };
+            chatState.setSessionMeta(tabId, corrected);
+            console.log('[reconnect] JSONL cross-check for', tabId, jsonlTokens, '→ merged:', corrected);
+          }).catch(() => {
+            // JSONL not available yet (active streaming session) — cache is sufficient
+          });
+        }
+        const tab = chatState.getTab(tabId);
+        if (tab) {
+          useChatStore.setState({
+            tabs: new Map(chatState.tabs).set(tabId, {
+              ...tab,
+              isStreaming: true,
+            }),
+          });
+        }
+        sessionState.setSessionRunning(tabId, true);
+
+        // Reset agent state: clear stale "completed" agents from disk load,
+        // then create a fresh main agent to reflect the running session.
+        // Also save to agentCache so that handleLoadSession's restoreFromCache
+        // doesn't wipe the agents (restoreFromCache clears agents on cache miss).
+        agentState.clearAgents();
+        agentState.upsertAgent({
+          id: 'main',
+          parentId: null,
+          description: 'Reconnected',
+          phase: 'thinking',
+          startTime: Date.now(),
+          isMain: true,
+        });
+        agentState.saveToCache(tabId);
+
+        // Skip if listeners already exist (e.g. InputBar already set them up)
+        if ((window as any).__claudeUnlisteners?.[stdinId]) continue;
+
+        // Re-register stream listener — handle text/thinking deltas, token tracking,
+        // agent phase updates, and process exit.
+        onClaudeStream(stdinId, (msg: any) => {
+          msg.__stdinId = stdinId;
+          const ownerTabId = useSessionStore.getState().getTabForStdin(stdinId);
+          const activeTabId = useSessionStore.getState().selectedSessionId;
+          const targetTabId = ownerTabId || activeTabId;
+          if (!targetTabId) return;
+
+          const store = useChatStore.getState();
+          const agStore = useAgentStore.getState();
+
+          if (msg.type === 'stream_event' && msg.event) {
+            const evt = msg.event;
+
+            if (evt.type === 'content_block_delta') {
+              const delta = evt.delta;
+              if (delta?.type === 'text_delta' && delta.text) {
+                store.updatePartialMessage(targetTabId, delta.text);
+                agStore.updatePhase('main', 'writing');
+              } else if (delta?.type === 'thinking_delta' && delta.thinking) {
+                store.updatePartialThinking(targetTabId, delta.thinking);
+                agStore.updatePhase('main', 'thinking');
+              }
+            }
+
+            // Track input tokens from message_start (per-turn + cumulative total)
+            if (evt.type === 'message_start' && evt.message?.usage?.input_tokens) {
+              const meta = store.getTab(targetTabId)?.sessionMeta ?? {};
+              const delta = evt.message.usage.input_tokens;
+              store.setSessionMeta(targetTabId, {
+                inputTokens: (meta.inputTokens || 0) + delta,
+                totalInputTokens: (meta.totalInputTokens || 0) + delta,
+              });
+              const updated = store.getTab(targetTabId)?.sessionMeta;
+              if (updated) saveTokenState(targetTabId, updated);
+            }
+
+            // Track output tokens from message_delta (per-turn + cumulative total)
+            if (evt.type === 'message_delta' && evt.usage?.output_tokens) {
+              const meta = store.getTab(targetTabId)?.sessionMeta ?? {};
+              const delta = evt.usage.output_tokens;
+              store.setSessionMeta(targetTabId, {
+                outputTokens: (meta.outputTokens || 0) + delta,
+                totalOutputTokens: (meta.totalOutputTokens || 0) + delta,
+              });
+              const updated = store.getTab(targetTabId)?.sessionMeta;
+              if (updated) saveTokenState(targetTabId, updated);
+            }
+
+            // Create sub-agents for Task/Agent tool_use starts
+            if (evt.type === 'content_block_start'
+                && evt.content_block?.type === 'tool_use'
+                && (evt.content_block?.name === 'Task' || evt.content_block?.name === 'Agent')) {
+              agStore.upsertAgent({
+                id: evt.content_block.id || `task_${Date.now()}`,
+                parentId: 'main',
+                description: '',
+                phase: 'spawning',
+                startTime: Date.now(),
+                isMain: false,
+              });
+            }
+          }
+
+          // Handle process exit — complete all agents and mark session idle
+          if (msg.type === 'process_exit') {
+            agStore.completeAll();
+            store.setSessionStatus(targetTabId, 'idle');
+          }
+        }).then((unlisten) => {
+          // Store unlisten for cleanup
+          if (!(window as any).__claudeUnlisteners) {
+            (window as any).__claudeUnlisteners = {};
+          }
+          if (!(window as any).__claudeUnlisteners[stdinId]) {
+            (window as any).__claudeUnlisteners[stdinId] = unlisten;
+          }
+        });
+
+        // Re-register exit listener
+        onSessionExit(stdinId, () => {
+          const exitTabId = useSessionStore.getState().getTabForStdin(stdinId);
+          if (exitTabId) {
+            useAgentStore.getState().completeAll();
+            useChatStore.getState().setSessionStatus(exitTabId, 'idle');
+          }
+        });
       }
     }).catch(() => {});
   }, []);

@@ -16,7 +16,7 @@ import { useChatStore } from './stores/chatStore';
 import { useSessionStore } from './stores/sessionStore';
 import { APP_NAME } from './lib/edition';
 import { useAgentStore } from './stores/agentStore';
-import { bridge, onFileChange } from './lib/tauri-bridge';
+import { bridge, onFileChange, onClaudeStream, onSessionExit } from './lib/tauri-bridge';
 import { useScrollZoom } from './lib/useScrollZoom';
 import { useT } from './lib/i18n';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -146,17 +146,84 @@ function App() {
     return () => { unlisten?.(); };
   }, []);
 
-  // TK-329: On app startup (incl. browser refresh), detect and kill orphaned backend processes.
-  // After refresh, frontend state (stdinToTab, listeners) is wiped, but Rust ProcessManager
-  // may still hold live child processes. Kill any that have no corresponding frontend mapping.
+  // TK-329: On app startup (incl. browser F5 refresh), handle active backend processes.
+  // - Processes WITH stdinToTab mapping: re-register event listeners and restore streaming state
+  // - Processes WITHOUT stdinToTab mapping: kill them (orphaned, no frontend mapping)
   useEffect(() => {
     bridge.listActiveProcesses().then((activeIds) => {
       if (!activeIds.length) return;
-      const { stdinToTab } = useSessionStore.getState();
-      const orphaned = activeIds.filter((id) => !stdinToTab[id]);
-      for (const id of orphaned) {
-        console.log('[TOKENICODE:cleanup] killing orphaned process:', id);
-        bridge.killSession(id).catch(() => {});
+      const sessionState = useSessionStore.getState();
+      const { stdinToTab } = sessionState;
+      const chatState = useChatStore.getState();
+
+      for (const stdinId of activeIds) {
+        const tabId = stdinToTab[stdinId];
+        if (!tabId) {
+          // Orphaned: no frontend mapping — kill it
+          console.log('[TOKENICODE:cleanup] killing orphaned process:', stdinId);
+          bridge.killSession(stdinId).catch(() => {});
+          continue;
+        }
+
+        // Reconnect: the session has a valid tab mapping
+        console.log('[TOKENICODE:reconnect] reconnecting to:', stdinId, '→ tab:', tabId);
+
+        // Mark session as running and streaming
+        chatState.setSessionStatus(tabId, 'running');
+        chatState.setSessionMeta(tabId, { stdinId });
+        const tab = chatState.getTab(tabId);
+        if (tab) {
+          useChatStore.setState({
+            tabs: new Map(chatState.tabs).set(tabId, {
+              ...tab,
+              isStreaming: true,
+            }),
+          });
+        }
+        sessionState.setSessionRunning(stdinId, true);
+
+        // Skip if listeners already exist (e.g. InputBar already set them up)
+        if ((window as any).__claudeUnlisteners?.[stdinId]) continue;
+
+        // Re-register stream listener with basic NDJSON handler
+        onClaudeStream(stdinId, (msg: any) => {
+          msg.__stdinId = stdinId;
+          const ownerTabId = useSessionStore.getState().getTabForStdin(stdinId);
+          const activeTabId = useSessionStore.getState().selectedSessionId;
+          const targetTabId = ownerTabId || activeTabId;
+          if (!targetTabId) return;
+
+          // Basic stream processing for reconnection:
+          // Handle text_delta / thinking_delta to update partial text
+          if (msg.type === 'stream_event' && msg.event?.type === 'content_block_delta') {
+            const delta = msg.event.delta;
+            if (delta?.type === 'text_delta' && delta.text) {
+              useChatStore.getState().updatePartialMessage(targetTabId, delta.text);
+            } else if (delta?.type === 'thinking_delta' && delta.thinking) {
+              useChatStore.getState().updatePartialThinking(targetTabId, delta.thinking);
+            }
+          }
+          // Handle process exit
+          if (msg.type === 'process_exit') {
+            useChatStore.getState().setSessionStatus(targetTabId, 'idle');
+          }
+        }).then((unlisten) => {
+          // Store unlisten for cleanup
+          if (!(window as any).__claudeUnlisteners) {
+            (window as any).__claudeUnlisteners = {};
+          }
+          if (!(window as any).__claudeUnlisteners[stdinId]) {
+            (window as any).__claudeUnlisteners[stdinId] = unlisten;
+          }
+        });
+
+        // Re-register exit listener
+        onSessionExit(stdinId, () => {
+          const exitTabId = useSessionStore.getState().getTabForStdin(stdinId);
+          if (exitTabId) {
+            useChatStore.getState().setSessionStatus(exitTabId, 'idle');
+          }
+        });
       }
     }).catch(() => {});
   }, []);

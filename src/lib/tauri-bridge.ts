@@ -630,9 +630,19 @@ export function onClaudeStream(
   stdinId: string,
   callback: (message: any) => void,
 ): Promise<UnlistenFn> {
+  const channel = `claude:stream:${stdinId}`;
+  console.log('[bridge] registering stream listener:', channel);
   return listen<any>(
-    `claude:stream:${stdinId}`,
-    (event) => callback(event.payload),
+    channel,
+    (event) => {
+      // Diagnostic: log first event received to confirm the IPC bridge is working
+      if (!(window as any).__tcFirstEventLogged?.[stdinId]) {
+        if (!(window as any).__tcFirstEventLogged) (window as any).__tcFirstEventLogged = {};
+        (window as any).__tcFirstEventLogged[stdinId] = true;
+        console.log('[bridge] first stream event received on:', channel, 'type:', event.payload?.type);
+      }
+      callback(event.payload);
+    },
   );
 }
 

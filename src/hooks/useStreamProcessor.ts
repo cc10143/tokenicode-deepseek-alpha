@@ -96,6 +96,14 @@ function _doFlush(stdinId: string, buf: _StreamBuffer) {
     useSessionStore.getState().registerStdinTab(stdinId, tabId);
   }
   if (!tabId) {
+    // No active tab to render into — the selectedSessionId is likely null
+    // (e.g. app just launched, no tab selected yet). Log and discard buffered
+    // text so stale data won't be flushed to the wrong tab later.
+    console.warn('[stream-flush] no tabId for stdinId:', stdinId,
+      'mappedId:', mappedId,
+      'selectedSessionId:', useSessionStore.getState().selectedSessionId,
+      'dropping text:', buf.text.slice(0, 80),
+      'dropping thinking:', buf.thinking.slice(0, 80));
     buf.text = '';
     buf.thinking = '';
     return;

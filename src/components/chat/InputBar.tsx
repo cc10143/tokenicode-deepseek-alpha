@@ -217,6 +217,7 @@ export function InputBar() {
   const workingDirectory = useSettingsStore((s) => s.workingDirectory);
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const sessionMode = useSettingsStore((s) => s.sessionMode);
+  const ctrlEnterToSend = useSettingsStore((s) => s.ctrlEnterToSend);
 
   const handlePlanApprove = useCallback(async () => {
     const tabId = useSessionStore.getState().selectedSessionId;
@@ -1352,17 +1353,32 @@ export function InputBar() {
       }
     }
 
-    if (e.metaKey || e.ctrlKey) {
-      // Cmd+Enter / Ctrl+Enter → let tiptap insert newline (default behavior)
+    if (ctrlEnterToSend) {
+      // "Ctrl+Enter to send" mode: Ctrl/Cmd+Enter sends, plain Enter inserts newline
+      if (e.metaKey || e.ctrlKey) {
+        // Ctrl+Enter / Cmd+Enter → send message
+        e.preventDefault();
+        handleSubmit();
+        return true;
+      } else {
+        // Plain Enter → let tiptap insert newline
+        // Shift+Enter → also let tiptap handle (inserts hard break)
+        return false;
+      }
+    } else {
+      // Default mode: Enter sends, Ctrl/Cmd+Enter inserts newline
+      if (e.metaKey || e.ctrlKey) {
+        // Cmd+Enter / Ctrl+Enter → let tiptap insert newline
+        return false;
+      } else if (!e.shiftKey) {
+        // Plain Enter → send message
+        e.preventDefault();
+        handleSubmit();
+        return true;
+      }
+      // Shift+Enter → let tiptap handle (inserts hard break)
       return false;
-    } else if (!e.shiftKey) {
-      // Plain Enter → send message
-      e.preventDefault();
-      handleSubmit();
-      return true;
     }
-    // Shift+Enter → let tiptap handle (inserts hard break / new paragraph)
-    return false;
   };
 
   // --- File handling ---
@@ -1498,7 +1514,7 @@ export function InputBar() {
             <span className="flex-shrink-0 text-[10px] text-text-tertiary/50
               group-focus-within/input:hidden select-none whitespace-nowrap
               self-center mr-1">
-              {t('input.shortcutHint')}
+              {t(ctrlEnterToSend ? 'input.shortcutHintCtrlEnter' : 'input.shortcutHint')}
             </span>
           )}
           {/* Stop button — visible only while running */}

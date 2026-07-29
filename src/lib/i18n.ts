@@ -52,6 +52,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'think.max': '最深思考',
     'think.providerIgnored': '当前供应商可能不支持 thinking 设置',
     'input.shortcutHint': '⏎ 发送 · {mod}⏎ 换行',
+    'input.shortcutHintCtrlEnter': '⏎ 换行 · {mod}⏎ 发送',
 
     // MessageBubble
     'msg.thinking': '思考中...',
@@ -358,6 +359,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.fontFamily': '界面字体',
     'settings.fontFamilyHint': '如果某个字体未安装，系统会自动使用后备字体。',
     'settings.monoFontFollowsInterface': '等宽区域跟随界面字体',
+    'settings.chatInteraction': '对话交互',
+    'settings.ctrlEnterToSend': '使用 Ctrl+Enter 发送消息',
+    'settings.ctrlEnterToSendHint': '使用 Ctrl+Enter 发送消息，而不是 Enter 发送',
     'settings.advanced': '高级设置',
     'settings.tab.general': '通用',
     'settings.tab.provider': 'API 提供商',
@@ -766,6 +770,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'think.max': 'Think Max',
     'think.providerIgnored': 'This provider may not support thinking settings',
     'input.shortcutHint': '⏎ Send · {mod}⏎ New line',
+    'input.shortcutHintCtrlEnter': '⏎ New line · {mod}⏎ Send',
 
     // MessageBubble
     'msg.thinking': 'Thinking...',
@@ -1072,6 +1077,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.fontFamily': 'Interface Font',
     'settings.fontFamilyHint': 'If a font is not installed, the system fallback will be used.',
     'settings.monoFontFollowsInterface': 'Mono-styled labels follow interface font',
+    'settings.chatInteraction': 'Chat Interaction',
+    'settings.ctrlEnterToSend': 'Use Ctrl+Enter to send',
+    'settings.ctrlEnterToSendHint': 'Use Ctrl+Enter to send messages instead of Enter',
     'settings.advanced': 'Advanced',
     'settings.tab.general': 'General',
     'settings.tab.provider': 'API Provider',

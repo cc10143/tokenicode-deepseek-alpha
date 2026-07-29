@@ -96,6 +96,10 @@ export interface SessionMeta {
   totalInputTokens?: number;
   /** Cumulative output tokens across ALL turns in this session/task */
   totalOutputTokens?: number;
+  /** Estimated thinking tokens (current turn) from system thinking_tokens events */
+  thinkingTokens?: number;
+  /** Cumulative estimated thinking tokens across all turns */
+  totalThinkingTokens?: number;
   /** Timestamp (Date.now()) when the current turn started — used for elapsed timer */
   turnStartTime?: number;
   /** Timestamp of last stream activity — used for stall detection instead of total elapsed */

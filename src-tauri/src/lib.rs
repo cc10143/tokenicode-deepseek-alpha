@@ -2957,6 +2957,78 @@ async fn load_session(path: String) -> Result<Vec<Value>, String> {
     Ok(messages)
 }
 
+/// Compute cumulative token totals from a Claude session JSONL file.
+/// Reads message_start.input_tokens and message_delta.output_tokens events.
+#[tauri::command]
+async fn get_session_tokens(session_id: String) -> Result<Value, String> {
+    use std::io::BufRead;
+
+    // Find the JSONL file: ~/.claude/projects/<any-project>/<session_id>.jsonl
+    let home = dirs::home_dir().ok_or("Cannot find home dir")?;
+    let projects_dir = home.join(".claude").join("projects");
+    let mut jsonl_path = None;
+
+    if projects_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+            for entry in entries.flatten() {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let candidate = entry.path().join(format!("{}.jsonl", &session_id));
+                if candidate.exists() {
+                    jsonl_path = Some(candidate);
+                    break;
+                }
+            }
+        }
+    }
+
+    let path = jsonl_path.ok_or_else(|| format!("Session JSONL not found for: {}", session_id))?;
+
+    let file = std::fs::File::open(&path)
+        .map_err(|e| format!("Failed to open session JSONL: {}", e))?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut total_input_tokens: u64 = 0;
+    let mut total_output_tokens: u64 = 0;
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let json = match serde_json::from_str::<Value>(&line) {
+            Ok(j) => j,
+            Err(_) => continue,
+        };
+
+        // Only process stream_event types
+        if json["type"].as_str() != Some("stream_event") {
+            continue;
+        }
+
+        let event = &json["event"];
+        match event["type"].as_str() {
+            Some("message_start") => {
+                if let Some(tokens) = event["message"]["usage"]["input_tokens"].as_u64() {
+                    total_input_tokens += tokens;
+                }
+            }
+            Some("message_delta") => {
+                if let Some(tokens) = event["usage"]["output_tokens"].as_u64() {
+                    total_output_tokens += tokens;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(serde_json::json!({
+        "totalInputTokens": total_input_tokens,
+        "totalOutputTokens": total_output_tokens,
+    }))
+}
+
 #[tauri::command]
 async fn open_in_vscode(path: String) -> Result<(), String> {
     let mut cmd = Command::new("code");
@@ -7799,6 +7871,7 @@ pub fn run() {
             get_profile_stats,
             search_sessions,
             load_session,
+            get_session_tokens,
             read_file_tree,
             read_file_content,
             write_file_content,

@@ -2301,28 +2301,40 @@ async fn delete_session(session_id: String, session_path: String) -> Result<(), 
         );
     }
 
-    // Delete the .jsonl file — validate path is under ~/.claude/projects/ (P0-1 fix)
+    // Delete the .jsonl file — validate path is under ~/.claude/projects/
     let mut deleted = false;
     if !session_path.is_empty() {
         let target = std::path::Path::new(&session_path);
         if target.exists() {
-            let canonical = target
-                .canonicalize()
-                .map_err(|e| format!("Failed to canonicalize path: {}", e))?;
             let home = dirs::home_dir().ok_or("Cannot find home dir")?;
             let allowed_dir = home.join(".claude").join("projects");
-            if !canonical.starts_with(&allowed_dir) {
+
+            // Validate path is under ~/.claude/projects/ without relying on
+            // canonicalize(), which can fail on Windows for locked/junction paths.
+            let target_abs = if target.is_absolute() {
+                target.to_path_buf()
+            } else {
+                allowed_dir.join(target)
+            };
+            if !target_abs.starts_with(&allowed_dir)
+                || target_abs.components().any(|c| c == std::path::Component::ParentDir)
+            {
+                log::error!(
+                    "[TOKENICODE:session] Refusing to delete file outside projects dir: {:?}",
+                    target_abs
+                );
                 return Err(format!(
                     "Refusing to delete file outside ~/.claude/projects/: {:?}",
-                    canonical
+                    target_abs
                 ));
             }
-            std::fs::remove_file(&canonical)
+
+            std::fs::remove_file(&target_abs)
                 .map_err(|e| format!("Failed to delete session file: {}", e))?;
             deleted = true;
             log::info!(
-                "[TOKENICODE:session] File deleted: session={}, canonical={:?}",
-                session_id, canonical
+                "[TOKENICODE:session] File deleted: session={}, path={:?}",
+                session_id, target_abs
             );
         } else {
             log::warn!(
@@ -2495,6 +2507,13 @@ async fn get_profile_stats() -> Result<Value, String> {
                     continue;
                 };
                 let session_id = name.to_string_lossy().to_string();
+
+                // Skip ghost sessions (auto-title tasks, aborted enqueue, etc.)
+                let (_, _, has_assistant) = extract_session_info(&path);
+                if !has_assistant {
+                    continue;
+                }
+
                 counted_sessions.insert(session_id.clone());
 
                 let Ok(file) = std::fs::File::open(&path) else {
@@ -2617,11 +2636,14 @@ async fn search_sessions(query: String) -> Result<Vec<Value>, String> {
                     for file in files.flatten() {
                         let path = file.path();
                         if path.extension().map_or(false, |e| e == "jsonl") {
-                            if let Some(name) = path.file_stem() {
-                                let id = name.to_string_lossy().to_string();
-                                if let Some(result) = search_session_file(&path, &query_lower) {
-                                    results.push(result);
-                                }
+                            // Skip ghost sessions
+                            let (_, _, has_assistant) = extract_session_info(&path);
+                            if !has_assistant {
+                                continue;
+                            }
+
+                            if let Some(result) = search_session_file(&path, &query_lower) {
+                                results.push(result);
                             }
                         }
                     }
@@ -2880,8 +2902,8 @@ fn extract_session_info(path: &std::path::Path) -> (String, String, bool) {
             }
         }
 
-        // Stop early if we have both
-        if !cwd.is_empty() && !preview.is_empty() {
+        // Stop early if we have everything
+        if !cwd.is_empty() && !preview.is_empty() && has_assistant {
             break;
         }
     }

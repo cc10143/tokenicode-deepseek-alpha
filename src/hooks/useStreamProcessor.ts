@@ -39,6 +39,43 @@ export function formatErrorForUser(raw: string): string {
   return `${friendly}\n\n<details>\n<summary>${t('error.showDetails')}</summary>\n\n\`\`\`\n${raw}\n\`\`\`\n\n</details>`;
 }
 
+// --- Token state cache + Claude UUID index (survives F5 via sessionStorage) ---
+// Token persistence: real-time cache for F5 recovery during active streaming.
+// UUID index: maps tabId → Claude session UUID for JSONL cross-check on reconnect.
+
+const TOKEN_STATE_KEY = 'tokenicode_token_state_v2';
+const UUID_INDEX_KEY = 'tokenicode_claude_uuids';
+
+function _persistTokenState(tabId: string, meta: { inputTokens?: number; outputTokens?: number; totalInputTokens?: number; totalOutputTokens?: number }) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(TOKEN_STATE_KEY) || '{}');
+    data[tabId] = {
+      inputTokens: meta.inputTokens,
+      outputTokens: meta.outputTokens,
+      totalInputTokens: meta.totalInputTokens,
+      totalOutputTokens: meta.totalOutputTokens,
+    };
+    sessionStorage.setItem(TOKEN_STATE_KEY, JSON.stringify(data));
+  } catch {/* ignore */}
+}
+
+function _persistClaudeUuid(tabId: string, claudeUuid: string) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(UUID_INDEX_KEY) || '{}');
+    data[tabId] = claudeUuid;
+    sessionStorage.setItem(UUID_INDEX_KEY, JSON.stringify(data));
+  } catch {/* ignore */}
+}
+
+export function loadClaudeUuid(tabId: string): string | null {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(UUID_INDEX_KEY) || '{}');
+    return data[tabId] || null;
+  } catch {
+    return null;
+  }
+}
+
 // --- Streaming text buffer (rAF-throttled + interval fallback, per-stdinId) ---
 // Coalesces rapid text_delta / thinking_delta events into a single state update
 // per animation frame (~60/s), preventing JS main thread starvation from
@@ -96,6 +133,14 @@ function _doFlush(stdinId: string, buf: _StreamBuffer) {
     useSessionStore.getState().registerStdinTab(stdinId, tabId);
   }
   if (!tabId) {
+    // No active tab to render into — the selectedSessionId is likely null
+    // (e.g. app just launched, no tab selected yet). Log and discard buffered
+    // text so stale data won't be flushed to the wrong tab later.
+    console.warn('[stream-flush] no tabId for stdinId:', stdinId,
+      'mappedId:', mappedId,
+      'selectedSessionId:', useSessionStore.getState().selectedSessionId,
+      'dropping text:', buf.text.slice(0, 80),
+      'dropping thinking:', buf.thinking.slice(0, 80));
     buf.text = '';
     buf.thinking = '';
     return;
@@ -385,6 +430,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             inputTokens: (bgTab?.sessionMeta.inputTokens || 0) + delta,
             totalInputTokens: (bgTab?.sessionMeta.totalInputTokens || 0) + delta,
           });
+          const updatedMeta = store.getTab(tabId)?.sessionMeta;
+          if (updatedMeta) _persistTokenState(tabId, updatedMeta);
         }
         if (evt.type === 'message_delta' && evt.usage?.output_tokens) {
           const bgTab = store.getTab(tabId);
@@ -393,6 +440,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             outputTokens: (bgTab?.sessionMeta.outputTokens || 0) + delta,
             totalOutputTokens: (bgTab?.sessionMeta.totalOutputTokens || 0) + delta,
           });
+          const updatedMeta2 = store.getTab(tabId)?.sessionMeta;
+          if (updatedMeta2) _persistTokenState(tabId, updatedMeta2);
         }
         break;
       }
@@ -576,6 +625,9 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             turnStartTime: undefined,
             lastProgressAt: undefined,
           });
+          // Persist final token state for F5 recovery (background tab)
+          const bgResultMeta = store.getTab(tabId)?.sessionMeta;
+          if (bgResultMeta) _persistTokenState(tabId, bgResultMeta);
         }
         if (typeof msg.result === 'string' && msg.result) {
           // Only add if not already delivered via 'assistant' event
@@ -908,6 +960,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
       if (currentId !== cliSessionId) {
         setSessionMeta({ sessionId: cliSessionId });
         bridge.trackSession(cliSessionId).catch(() => {});
+        // Persist Claude session UUID for F5 recovery (token totals read from JSONL)
+        _persistClaudeUuid(tabId, cliSessionId);
 
         // Promote draft tab to real session ID so it merges with disk session
         if (tabId.startsWith('draft_')) {
@@ -921,6 +975,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             useChatStore.setState({ tabs: newTabs, sessionCache: newTabs });
           }
           useSessionStore.getState().promoteDraft(tabId, cliSessionId);
+          // Update UUID index: tab key changed from draft_* to the real UUID
+          _persistClaudeUuid(cliSessionId, cliSessionId);
         }
 
         useSessionStore.getState().fetchSessions();
@@ -1045,6 +1101,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             inputTokens: (meta.inputTokens || 0) + delta,
             totalInputTokens: (meta.totalInputTokens || 0) + delta,
           });
+          const updatedMeta = useChatStore.getState().getTab(tabId)?.sessionMeta;
+          if (updatedMeta) _persistTokenState(tabId, updatedMeta);
         }
 
         // Track output tokens from message_delta (per-turn + cumulative total)
@@ -1055,6 +1113,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             outputTokens: (meta.outputTokens || 0) + delta,
             totalOutputTokens: (meta.totalOutputTokens || 0) + delta,
           });
+          const updatedMeta2 = useChatStore.getState().getTab(tabId)?.sessionMeta;
+          if (updatedMeta2) _persistTokenState(tabId, updatedMeta2);
         }
         break;
       }
@@ -1072,6 +1132,20 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             content: formatErrorForUser(rawError),
             timestamp: Date.now(),
           });
+        } else if (msg.subtype === 'thinking_tokens') {
+          // Track estimated thinking token usage (Claude CLI stream-json)
+          // Updates sessionMeta with thinking token estimates for display
+          const thinkingTokens = msg.estimated_tokens;
+          if (typeof thinkingTokens === 'number') {
+            const meta = useChatStore.getState().getTab(tabId)?.sessionMeta ?? {};
+            setSessionMeta({
+              thinkingTokens,
+              totalThinkingTokens: (meta.totalThinkingTokens || 0) + (msg.estimated_tokens_delta || 0),
+            });
+          }
+        } else if (msg.subtype === 'status') {
+          // Session status updates (e.g. "requesting") — informational, silently tracked
+          // We don't surface these as user-visible messages; they're internal CLI state
         } else {
           // FI-3: Log unknown subtypes so we know what we're missing
           console.warn('[TOKENICODE] Unhandled system subtype:', msg.subtype, msg);
@@ -1715,6 +1789,9 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             turnStartTime: undefined,
             lastProgressAt: undefined,
           });
+          // Persist final token state for F5 recovery
+          const resultMeta = useChatStore.getState().getTab(tabId)?.sessionMeta;
+          if (resultMeta) _persistTokenState(tabId, resultMeta);
         }
         agentActions.completeAll(
           msg.subtype === 'success' ? 'completed' : 'error'

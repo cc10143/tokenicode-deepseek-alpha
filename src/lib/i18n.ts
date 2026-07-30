@@ -52,6 +52,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'think.max': '最深思考',
     'think.providerIgnored': '当前供应商可能不支持 thinking 设置',
     'input.shortcutHint': '⏎ 发送 · {mod}⏎ 换行',
+    'input.shortcutHintCtrlEnter': '⏎ 换行 · {mod}⏎ 发送',
 
     // MessageBubble
     'msg.thinking': '思考中...',
@@ -101,6 +102,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'conv.selected': '已选 {n} 个',
     'conv.contentMatches': '内容匹配',
     'conv.searchingContent': '搜索会话内容...',
+    'conv.viewFolder': '按文件夹',
+    'conv.viewRecent': '最近活跃',
+    'conv.locateInFolder': '在文件夹视图中定位',
+    'conv.openInExplorer': '在资源管理器中打开',
+    'conv.openInTerminal': '在终端中打开',
+    'conv.openInTerminalAdmin': '以管理员身份在终端中打开',
 
     // ExportMenu
     'export.title': '导出任务',
@@ -283,6 +290,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'msg.copyText': '复制',
     'msg.copied': '已复制！',
     'msg.imgError': '图片加载失败',
+    'msg.clickToEnlarge': '点击放大查看',
+    'msg.ctrlClickToOpenExternally': 'Ctrl+单击以外部应用打开',
+    'msg.clickToView': '查看',
     'msg.openLink': '在浏览器打开',
 
     // Permission / Plan interactive UI
@@ -358,6 +368,13 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.fontFamily': '界面字体',
     'settings.fontFamilyHint': '如果某个字体未安装，系统会自动使用后备字体。',
     'settings.monoFontFollowsInterface': '等宽区域跟随界面字体',
+    'settings.chatInteraction': '对话交互',
+    'settings.ctrlEnterToSend': '使用 Ctrl+Enter 发送消息',
+    'settings.ctrlEnterToSendHint': '使用 Ctrl+Enter 发送消息，而不是 Enter 发送',
+    'settings.ctrlClickOpenExternally': '按住 Ctrl 单击文件以系统默认应用打开',
+    'settings.ctrlClickOpenExternallyHint': '启用后，按住 Ctrl 单击文件将以系统默认应用打开（而非软件内预览）。Ctrl+右键可在文件资源管理器中定位文件。',
+    'settings.showImageThumbnails': '显示图片缩略图预览',
+    'settings.showImageThumbnailsHint': '在对话中为 AI 生成的图片（< 50MB）显示缩略图窗口，便于快速浏览。',
     'settings.advanced': '高级设置',
     'settings.tab.general': '通用',
     'settings.tab.provider': 'API 提供商',
@@ -766,6 +783,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'think.max': 'Think Max',
     'think.providerIgnored': 'This provider may not support thinking settings',
     'input.shortcutHint': '⏎ Send · {mod}⏎ New line',
+    'input.shortcutHintCtrlEnter': '⏎ New line · {mod}⏎ Send',
 
     // MessageBubble
     'msg.thinking': 'Thinking...',
@@ -815,6 +833,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'conv.selected': '{n} selected',
     'conv.contentMatches': 'Content matches',
     'conv.searchingContent': 'Searching content...',
+    'conv.viewFolder': 'By Folder',
+    'conv.viewRecent': 'Recent',
+    'conv.locateInFolder': 'Locate in Folder',
+    'conv.openInExplorer': 'Open in Explorer',
+    'conv.openInTerminal': 'Open in Terminal',
+    'conv.openInTerminalAdmin': 'Open in Terminal as Admin',
 
     // ExportMenu
     'export.title': 'Export task',
@@ -997,6 +1021,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'msg.copyText': 'Copy',
     'msg.copied': 'Copied!',
     'msg.imgError': 'Image failed to load',
+    'msg.clickToEnlarge': 'Click to enlarge',
+    'msg.ctrlClickToOpenExternally': 'Ctrl+Click to open externally',
+    'msg.clickToView': 'View',
     'msg.openLink': 'Open in browser',
 
     // Permission / Plan interactive UI
@@ -1072,6 +1099,13 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.fontFamily': 'Interface Font',
     'settings.fontFamilyHint': 'If a font is not installed, the system fallback will be used.',
     'settings.monoFontFollowsInterface': 'Mono-styled labels follow interface font',
+    'settings.chatInteraction': 'Chat Interaction',
+    'settings.ctrlEnterToSend': 'Use Ctrl+Enter to send',
+    'settings.ctrlEnterToSendHint': 'Use Ctrl+Enter to send messages instead of Enter',
+    'settings.ctrlClickOpenExternally': 'Hold Ctrl and click file to open with system default app',
+    'settings.ctrlClickOpenExternallyHint': 'When enabled, hold Ctrl and click a file to open it with the system default app instead of previewing in-app. Ctrl+RightClick always reveals the file in file manager.',
+    'settings.showImageThumbnails': 'Show image thumbnail previews',
+    'settings.showImageThumbnailsHint': 'Display thumbnail previews for AI-generated images (< 50MB) in conversations for quick browsing.',
     'settings.advanced': 'Advanced',
     'settings.tab.general': 'General',
     'settings.tab.provider': 'API Provider',

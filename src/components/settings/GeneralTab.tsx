@@ -162,6 +162,12 @@ export function GeneralTab() {
   const setFontSize = useSettingsStore((s) => s.setFontSize);
   const setFontFamily = useSettingsStore((s) => s.setFontFamily);
   const setMonoFontFollowsInterface = useSettingsStore((s) => s.setMonoFontFollowsInterface);
+  const ctrlEnterToSend = useSettingsStore((s) => s.ctrlEnterToSend);
+  const toggleCtrlEnterToSend = useSettingsStore((s) => s.toggleCtrlEnterToSend);
+  const ctrlClickOpenExternally = useSettingsStore((s) => s.ctrlClickOpenExternally);
+  const toggleCtrlClickOpenExternally = useSettingsStore((s) => s.toggleCtrlClickOpenExternally);
+  const showImageThumbnails = useSettingsStore((s) => s.showImageThumbnails);
+  const toggleShowImageThumbnails = useSettingsStore((s) => s.toggleShowImageThumbnails);
   const aiAvatarUrl = useSettingsStore((s) => s.aiAvatarUrl);
   const setAiAvatarUrl = useSettingsStore((s) => s.setAiAvatarUrl);
   const userAvatarUrl = useSettingsStore((s) => s.userAvatarUrl);
@@ -429,11 +435,11 @@ export function GeneralTab() {
             className="mt-2 inline-flex items-center gap-2 text-[12px] text-text-secondary
               hover:text-text-primary transition-smooth"
           >
-            <span className={`relative w-8 h-4 rounded-full transition-smooth
-              ${monoFontFollowsInterface ? 'bg-accent/80' : 'bg-bg-tertiary border border-border-subtle'}`}
+            <span className={`relative w-8 h-4 rounded-full transition-smooth border
+              ${monoFontFollowsInterface ? 'bg-accent/80 border-accent/30' : 'bg-bg-tertiary border-border-subtle'}`}
             >
-              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform
-                ${monoFontFollowsInterface ? 'translate-x-4' : 'translate-x-0.5'}`}
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all
+                ${monoFontFollowsInterface ? 'right-0.5' : 'left-0.5'}`}
               />
             </span>
             {t('settings.monoFontFollowsInterface')}
@@ -536,6 +542,70 @@ export function GeneralTab() {
           </div>
           <p className="mt-2 text-xs text-text-tertiary leading-relaxed">
             这个值会直接决定自动发送 `/compact` 的时机；改完后对当前会话立即生效。
+          </p>
+        </div>
+
+        {/* Chat Interaction */}
+        <div>
+          <h3 className="text-[13px] font-medium text-text-primary mb-2">{t('settings.chatInteraction')}</h3>
+          <button
+            onClick={toggleCtrlEnterToSend}
+            className="inline-flex items-center gap-2 text-[12px] text-text-secondary
+              hover:text-text-primary transition-smooth"
+          >
+            <span className={`relative w-8 h-4 rounded-full transition-smooth border
+              ${ctrlEnterToSend ? 'bg-accent/80 border-accent/30' : 'bg-bg-tertiary border-border-subtle'}`}
+            >
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all
+                ${ctrlEnterToSend ? 'right-0.5' : 'left-0.5'}`}
+              />
+            </span>
+            {t('settings.ctrlEnterToSend')}
+          </button>
+          <p className="mt-1 text-[11px] text-text-tertiary leading-relaxed">
+            {t('settings.ctrlEnterToSendHint')}
+          </p>
+        </div>
+
+        {/* Ctrl+Click to open externally */}
+        <div>
+          <button
+            onClick={toggleCtrlClickOpenExternally}
+            className="inline-flex items-center gap-2 text-[12px] text-text-secondary
+              hover:text-text-primary transition-smooth"
+          >
+            <span className={`relative w-8 h-4 rounded-full transition-smooth border
+              ${ctrlClickOpenExternally ? 'bg-accent/80 border-accent/30' : 'bg-bg-tertiary border-border-subtle'}`}
+            >
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all
+                ${ctrlClickOpenExternally ? 'right-0.5' : 'left-0.5'}`}
+              />
+            </span>
+            {t('settings.ctrlClickOpenExternally')}
+          </button>
+          <p className="mt-1 text-[11px] text-text-tertiary leading-relaxed">
+            {t('settings.ctrlClickOpenExternallyHint')}
+          </p>
+        </div>
+
+        {/* Show image thumbnails */}
+        <div>
+          <button
+            onClick={toggleShowImageThumbnails}
+            className="inline-flex items-center gap-2 text-[12px] text-text-secondary
+              hover:text-text-primary transition-smooth"
+          >
+            <span className={`relative w-8 h-4 rounded-full transition-smooth border
+              ${showImageThumbnails ? 'bg-accent/80 border-accent/30' : 'bg-bg-tertiary border-border-subtle'}`}
+            >
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all
+                ${showImageThumbnails ? 'right-0.5' : 'left-0.5'}`}
+              />
+            </span>
+            {t('settings.showImageThumbnails')}
+          </button>
+          <p className="mt-1 text-[11px] text-text-tertiary leading-relaxed">
+            {t('settings.showImageThumbnailsHint')}
           </p>
         </div>
       </div>

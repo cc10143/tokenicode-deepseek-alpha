@@ -333,6 +333,9 @@ export const bridge = {
   loadSession: (path: string) =>
     invoke<any[]>('load_session', { path }),
 
+  getSessionTokens: (sessionId: string) =>
+    invoke<{ totalInputTokens: number; totalOutputTokens: number }>('get_session_tokens', { sessionId }),
+
   openInVscode: (path: string) =>
     invoke<void>('open_in_vscode', { path }),
 
@@ -543,6 +546,14 @@ export const bridge = {
   openTerminalLogin: () =>
     invoke<void>('open_terminal_login'),
 
+  /** Open a folder in the default terminal application (Windows Terminal on Windows) */
+  openFolderInTerminal: (path: string) =>
+    invoke<void>('open_folder_in_terminal', { path }),
+
+  /** Open a folder in terminal as Administrator (Windows only) */
+  openFolderInTerminalAdmin: (path: string) =>
+    invoke<void>('open_folder_in_terminal_admin', { path }),
+
   // Session custom names (persisted to ~/.claude/tokenicode_session_names.json)
   loadCustomPreviews: () =>
     invoke<Record<string, string>>('load_custom_previews'),
@@ -630,9 +641,19 @@ export function onClaudeStream(
   stdinId: string,
   callback: (message: any) => void,
 ): Promise<UnlistenFn> {
+  const channel = `claude:stream:${stdinId}`;
+  console.log('[bridge] registering stream listener:', channel);
   return listen<any>(
-    `claude:stream:${stdinId}`,
-    (event) => callback(event.payload),
+    channel,
+    (event) => {
+      // Diagnostic: log first event received to confirm the IPC bridge is working
+      if (!(window as any).__tcFirstEventLogged?.[stdinId]) {
+        if (!(window as any).__tcFirstEventLogged) (window as any).__tcFirstEventLogged = {};
+        (window as any).__tcFirstEventLogged[stdinId] = true;
+        console.log('[bridge] first stream event received on:', channel, 'type:', event.payload?.type);
+      }
+      callback(event.payload);
+    },
   );
 }
 

@@ -463,6 +463,19 @@ input, textarea, [contenteditable="true"],
   animation: title-update 0.5s ease-out;
 }
 
+/* Locate-in-folder highlight flash */
+@keyframes locate-flash {
+  0%, 100% { background-color: transparent; }
+  15% { background-color: rgba(99, 102, 241, 0.15); }
+  30% { background-color: transparent; }
+  45% { background-color: rgba(99, 102, 241, 0.1); }
+  60% { background-color: transparent; }
+}
+.locate-flash {
+  animation: locate-flash 2s ease-in-out;
+  border-radius: 0.5rem;
+}
+
 /* ================================================================
    Prose / Typography overrides — map to theme CSS vars
    ================================================================ */
@@ -1344,4 +1357,36 @@ thead {
 .custom-bg-active .gradient-bg::before,
 .custom-bg-active .gradient-bg::after {
   display: none !important;
+}
+
+/* ================================================================
+   KaTeX math rendering — sizing and display style
+   (ported from vscode-cc-enhance/enhance.js lines 24-31)
+   ================================================================ */
+.katex {
+  font-size: 1.1em;
+}
+.katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+/* Dark mode: ensure KaTeX text is visible on dark backgrounds */
+.dark .katex {
+  color: var(--color-text-primary);
+}
+
+/* ================================================================
+   Code block forced wrapping — prevents horizontal scroll
+   for long command output / log lines
+   (ported from vscode-cc-enhance/enhance.js lines 93-102)
+   ================================================================ */
+pre {
+  white-space: pre-wrap !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+}
+pre code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
 }

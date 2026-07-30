@@ -8,7 +8,7 @@ import {
   getContextWindowForModel,
   type ThinkingLevel,
 } from '../../stores/settingsStore';
-import { bridge, onClaudeStream, onClaudeStderr, onSessionExit, onPermissionRequest, type UnifiedCommand, type PermissionRequest } from '../../lib/tauri-bridge';
+import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr, onSessionExit, onPermissionRequest, type UnifiedCommand, type PermissionRequest } from '../../lib/tauri-bridge';
 import { ModelSelector } from './ModelSelector';
 import { ModeSelector } from './ModeSelector';
 import { FileUploadChips } from './FileUploadChips';
@@ -1140,6 +1140,7 @@ export function InputBar() {
           provider_id: liveProviderId || undefined,
           context_window: liveContextWindow,
           permission_mode: mapSessionModeToPermissionMode(liveSessionMode),
+          mcp_config_path: await getDefaultMcpConfigPath(),
         });
         console.log('[TOKENICODE:session] started successfully', { sessionId: session.session_id, pid: session.pid, cli: session.cli_path });
 

@@ -183,4 +183,8 @@ pub struct StartSessionParams {
     /// When not "bypassPermissions", enables --permission-prompt-tool stdio for structured
     /// permission requests via the SDK control protocol.
     pub permission_mode: Option<String>,
+    /// Path to an MCP config JSON file (e.g. ~/.claude.json or a filtered subset).
+    /// Passed as --mcp-config to the CLI. Works with --strict-mcp-config to load
+    /// only the explicitly listed MCP servers instead of auto-discovering all configs.
+    pub mcp_config_path: Option<String>,
 }

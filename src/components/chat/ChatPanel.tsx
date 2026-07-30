@@ -17,7 +17,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useFileStore } from '../../stores/fileStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { AgentPanel } from '../agents/AgentPanel';
-import { bridge, onClaudeStream, onClaudeStderr } from '../../lib/tauri-bridge';
+import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../../lib/tauri-bridge';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useT } from '../../lib/i18n';
 import { envFingerprint, resolveModelForProvider, resolveThinkingLevelForProvider } from '../../lib/api-provider';
@@ -1043,6 +1043,7 @@ async function startDraftSession(folderPath: string) {
       provider_id: providerId || undefined,
       context_window: getContextWindowForModel(resolvedModel, contextWindowMode),
       permission_mode: mapSessionModeToPermissionMode(sessionMode),
+      mcp_config_path: await getDefaultMcpConfigPath(),
     });
 
     // Store stdinId so InputBar can send the first message via stdin

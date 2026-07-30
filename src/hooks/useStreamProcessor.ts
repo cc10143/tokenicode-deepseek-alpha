@@ -10,7 +10,7 @@ import {
 import { useSessionStore } from '../stores/sessionStore';
 import { useAgentStore, resolveAgentId, getAgentDepth } from '../stores/agentStore';
 import { useFileStore } from '../stores/fileStore';
-import { bridge, onClaudeStream, onClaudeStderr } from '../lib/tauri-bridge';
+import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../lib/tauri-bridge';
 import { envFingerprint, resolveModelForProvider, resolveThinkingLevelForProvider } from '../lib/api-provider';
 import { useProviderStore } from '../stores/providerStore';
 import { t } from '../lib/i18n';
@@ -706,6 +706,22 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             content: formatErrorForUser(msg.message || msg.error || 'System error'),
             timestamp: Date.now(),
           });
+        } else if (msg.subtype === 'status' && msg.compact_result) {
+          const cmdMsgId = store.getTab(tabId)?.sessionMeta.pendingCommandMsgId;
+          if (cmdMsgId) {
+            store.updateMessage(tabId, cmdMsgId, {
+              commandCompleted: true,
+              commandData: {
+                ...(store.getTab(tabId)?.messages ?? []).find((m) => m.id === cmdMsgId)?.commandData,
+                output: `Compact ${msg.compact_result}`,
+                completedAt: Date.now(),
+              },
+            });
+            store.setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+            if (store.getTab(tabId)?.sessionStatus === 'running') {
+              store.setSessionStatus(tabId, 'idle');
+            }
+          }
         }
         break;
     }
@@ -1072,6 +1088,22 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             content: formatErrorForUser(rawError),
             timestamp: Date.now(),
           });
+        } else if (msg.subtype === 'status' && msg.compact_result) {
+          const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
+          if (pendingCmd) {
+            useChatStore.getState().updateMessage(tabId, pendingCmd, {
+              commandCompleted: true,
+              commandData: {
+                ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
+                output: `Compact ${msg.compact_result}`,
+                completedAt: Date.now(),
+              },
+            });
+            useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+            if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
+              useChatStore.getState().setSessionStatus(tabId, 'idle');
+            }
+          }
         } else {
           // FI-3: Log unknown subtypes so we know what we're missing
           console.warn('[TOKENICODE] Unhandled system subtype:', msg.subtype, msg);
@@ -1564,6 +1596,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                   provider_id: useProviderStore.getState().activeProviderId || undefined,
                   context_window: getContextWindowForModel(retryResolvedModel, retryContextWindowMode),
                   permission_mode: mapSessionModeToPermissionMode(sessionMode),
+                  mcp_config_path: await getDefaultMcpConfigPath(),
                 });
 
                 setSessionMeta({
@@ -1806,7 +1839,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                 useChatStore.getState().setSessionStatus(tabId, 'idle');
               }
             }
-          }, 15_000); // Bug C fix (#27): reduced from 90s to 15s
+          }, 60_000); // Compact takes 20-30s through proxy; 60s gives enough headroom
           break; // Skip pending message flush — compact takes priority
         }
 

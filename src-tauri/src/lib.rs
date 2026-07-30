@@ -1298,6 +1298,14 @@ async fn start_claude_session(
         "--strict-mcp-config".to_string(),
     ];
 
+    // When an explicit MCP config path is provided, load MCP servers from that file
+    // instead of scanning default locations. Together with --strict-mcp-config this
+    // lets TOKENICODE control exactly which MCP servers the CLI sees.
+    if let Some(ref mcp_config) = params.mcp_config_path {
+        args.push("--mcp-config".to_string());
+        args.push(mcp_config.clone());
+    }
+
     // Resume an existing CLI session if requested
     if let Some(ref resume_id) = params.resume_session_id {
         args.push("--resume".to_string());
@@ -2257,6 +2265,11 @@ fn cleanup_tracked_sessions() {
 /// Delete a session: remove from tracking file and delete the .jsonl file
 #[tauri::command]
 async fn delete_session(session_id: String, session_path: String) -> Result<(), String> {
+    log::info!(
+        "[TOKENICODE:session] Delete requested: session={}, path={}",
+        session_id, session_path
+    );
+
     // Remove from tracking file
     let track_path = tracked_sessions_path();
     if track_path.exists() {
@@ -2276,8 +2289,14 @@ async fn delete_session(session_id: String, session_path: String) -> Result<(), 
             .map_err(|e| format!("Failed to write tracked sessions: {}", e))?;
         std::fs::rename(&tmp, &track_path)
             .map_err(|e| format!("Failed to rename tracked sessions: {}", e))?;
+        log::info!(
+            "[TOKENICODE:session] Removed from tracking file: session={}",
+            session_id
+        );
     }
+
     // Delete the .jsonl file — validate path is under ~/.claude/projects/ (P0-1 fix)
+    let mut deleted = false;
     if !session_path.is_empty() {
         let target = std::path::Path::new(&session_path);
         if target.exists() {
@@ -2294,8 +2313,23 @@ async fn delete_session(session_id: String, session_path: String) -> Result<(), 
             }
             std::fs::remove_file(&canonical)
                 .map_err(|e| format!("Failed to delete session file: {}", e))?;
+            deleted = true;
+            log::info!(
+                "[TOKENICODE:session] File deleted: session={}, canonical={:?}",
+                session_id, canonical
+            );
+        } else {
+            log::warn!(
+                "[TOKENICODE:session] File not found (already deleted?): session={}, path={}",
+                session_id, session_path
+            );
         }
     }
+
+    log::info!(
+        "[TOKENICODE:session] Delete complete: session={}, file_deleted={}",
+        session_id, deleted
+    );
     Ok(())
 }
 
@@ -2315,9 +2349,6 @@ async fn list_sessions() -> Result<Vec<Value>, String> {
         return Ok(vec![]);
     }
 
-    // Only show sessions tracked by TOKENICODE
-    let tracked = load_tracked_sessions();
-
     let mut sessions = vec![];
     if let Ok(entries) = std::fs::read_dir(&claude_dir) {
         for entry in entries.flatten() {
@@ -2328,11 +2359,6 @@ async fn list_sessions() -> Result<Vec<Value>, String> {
                         if path.extension().map_or(false, |e| e == "jsonl") {
                             if let Some(name) = path.file_stem() {
                                 let id = name.to_string_lossy().to_string();
-
-                                // Skip sessions not created by TOKENICODE
-                                if !tracked.contains(&id) {
-                                    continue;
-                                }
 
                                 // Get file metadata for timestamp
                                 let modified = std::fs::metadata(&path)
@@ -2431,7 +2457,6 @@ async fn get_profile_stats() -> Result<Value, String> {
         }));
     }
 
-    let tracked = load_tracked_sessions();
     let mut daily: HashMap<String, ProfileDailyStats> = HashMap::new();
     let mut models: HashMap<String, ProfileModelStats> = HashMap::new();
     let mut counted_sessions: HashSet<String> = HashSet::new();
@@ -2458,9 +2483,6 @@ async fn get_profile_stats() -> Result<Value, String> {
                     continue;
                 };
                 let session_id = name.to_string_lossy().to_string();
-                if !tracked.contains(&session_id) {
-                    continue;
-                }
                 counted_sessions.insert(session_id.clone());
 
                 let Ok(file) = std::fs::File::open(&path) else {
@@ -2572,7 +2594,6 @@ async fn search_sessions(query: String) -> Result<Vec<Value>, String> {
         return Ok(vec![]);
     }
 
-    let tracked = load_tracked_sessions();
     let query_lower = query.to_lowercase();
 
     let mut results: Vec<Value> = Vec::new();
@@ -2586,9 +2607,6 @@ async fn search_sessions(query: String) -> Result<Vec<Value>, String> {
                         if path.extension().map_or(false, |e| e == "jsonl") {
                             if let Some(name) = path.file_stem() {
                                 let id = name.to_string_lossy().to_string();
-                                if !tracked.contains(&id) {
-                                    continue;
-                                }
                                 if let Some(result) = search_session_file(&path, &query_lower) {
                                     results.push(result);
                                 }

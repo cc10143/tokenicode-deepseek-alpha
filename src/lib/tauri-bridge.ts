@@ -25,6 +25,9 @@ export interface StartSessionParams {
    *  "acceptEdits" | "default" | "plan" | "bypassPermissions"
    *  When not "bypassPermissions", enables structured permission requests via SDK protocol. */
   permission_mode?: string;
+  /** Path to an MCP config JSON file (e.g. ~/.claude.json or a filtered subset).
+   *  Passed as --mcp-config to the CLI so the spawned process can load MCP servers. */
+  mcp_config_path?: string;
 }
 
 export interface SessionInfo {
@@ -104,6 +107,22 @@ export interface SlashCommand {
   description: string;
   source: 'builtin' | 'global' | 'project';
   has_args: boolean;
+}
+
+// --- Helpers ---
+
+let _cachedMcpConfigPath: string | undefined;
+
+/** Resolve the default MCP config path (~/.claude.json), cached after first call. */
+export async function getDefaultMcpConfigPath(): Promise<string | undefined> {
+  if (_cachedMcpConfigPath) return _cachedMcpConfigPath;
+  try {
+    const home = await bridge.getHomeDir();
+    _cachedMcpConfigPath = `${home.replace(/\\/g, '/')}/.claude.json`;
+    return _cachedMcpConfigPath;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface SkillInfo {

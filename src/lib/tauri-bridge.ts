@@ -546,6 +546,14 @@ export const bridge = {
   openTerminalLogin: () =>
     invoke<void>('open_terminal_login'),
 
+  /** Open a folder in the default terminal application (Windows Terminal on Windows) */
+  openFolderInTerminal: (path: string) =>
+    invoke<void>('open_folder_in_terminal', { path }),
+
+  /** Open a folder in terminal as Administrator (Windows only) */
+  openFolderInTerminalAdmin: (path: string) =>
+    invoke<void>('open_folder_in_terminal_admin', { path }),
+
   // Session custom names (persisted to ~/.claude/tokenicode_session_names.json)
   loadCustomPreviews: () =>
     invoke<Record<string, string>>('load_custom_previews'),

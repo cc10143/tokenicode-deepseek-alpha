@@ -3100,6 +3100,78 @@ async fn open_with_default_app(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn open_folder_in_terminal(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-a", "Terminal", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Try Windows Terminal first, fallback to cmd
+        let wt_result = Command::new("wt")
+            .args(["-d", &path])
+            .creation_flags(0x08000000)
+            .spawn();
+        if wt_result.is_err() {
+            Command::new("cmd")
+                .args(["/K", "cd", "/d", &path])
+                .creation_flags(0x00000010) // CREATE_NEW_CONSOLE
+                .spawn()
+                .map_err(|e| format!("Failed to open terminal: {}", e))?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let cd_cmd = format!("cd '{}' && $SHELL", path.replace('\'', "'\\''"));
+        let terminals: &[(&str, &[&str])] = &[
+            ("gnome-terminal", &["--", "bash", "-c", cd_cmd.as_str()] as &[&str]),
+            ("konsole", &["-e", "bash", "-c", cd_cmd.as_str()]),
+            ("xterm", &["-e", cd_cmd.as_str()]),
+        ];
+        let mut opened = false;
+        for (term, args) in terminals {
+            if std::process::Command::new(term)
+                .args(args.iter().copied())
+                .spawn()
+                .is_ok()
+            {
+                opened = true;
+                break;
+            }
+        }
+        if !opened {
+            return Err("No supported terminal emulator found".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_folder_in_terminal_admin(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to start Windows Terminal elevated
+        let ps_script = format!(
+            "Start-Process wt -Verb RunAs -ArgumentList '-d', '{}'",
+            path.replace('\'', "''")
+        );
+        std::process::Command::new("powershell")
+            .args(["-Command", &ps_script])
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|e| format!("Failed to open elevated terminal: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Administrator terminal is only supported on Windows".to_string())
+    }
+}
+
 /// Helper: create an NSURL from a file path string (macOS only).
 /// Returns a raw pointer to the NSURL object, or null on failure.
 #[cfg(target_os = "macos")]
@@ -7926,6 +7998,8 @@ pub fn run() {
             start_claude_login,
             check_claude_auth,
             open_terminal_login,
+            open_folder_in_terminal,
+            open_folder_in_terminal_admin,
             load_custom_previews,
             save_custom_previews,
             load_pinned_sessions,

@@ -102,11 +102,11 @@ function ContextMenu({ menu, onClose, callbacks }: {
       },
       'separator' as const,
     ] as MenuItem[] : []),
-    ...(!menu.isDir ? [{
+    {
       label: t('files.insertToChat'),
       icon: <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 14l4-2 8-8-2-2-8 8-2 4z" /><path d="M10 4l2 2" /></svg>,
       action: () => { callbacks.onInsertToChat(menu.path); onClose(); },
-    }] as MenuItem[] : []),
+    },
     {
       label: t('files.copyPath'),
       icon: <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M5 2H2v12h8v-3" /><path d="M6 6h8v8H6V6z" /></svg>,
@@ -602,7 +602,7 @@ export function FileExplorer() {
     const tab = useChatStore.getState().getTab(tabId);
     const currentDraft = tab?.inputDraft ?? '';
     const prefix = currentDraft && !currentDraft.endsWith('\n') && !currentDraft.endsWith(' ') ? ' ' : '';
-    useChatStore.getState().setInputDraft(tabId, currentDraft + prefix + path);
+    useChatStore.getState().setInputDraft(tabId, currentDraft + prefix + '"' + path + '"');
   }, []);
 
   const handleNewFile = useCallback((dir: string) => {

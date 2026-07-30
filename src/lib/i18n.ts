@@ -102,6 +102,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'conv.selected': '已选 {n} 个',
     'conv.contentMatches': '内容匹配',
     'conv.searchingContent': '搜索会话内容...',
+    'conv.viewFolder': '按文件夹',
+    'conv.viewRecent': '最近活跃',
+    'conv.locateInFolder': '在文件夹视图中定位',
+    'conv.openInExplorer': '在资源管理器中打开',
+    'conv.openInTerminal': '在终端中打开',
+    'conv.openInTerminalAdmin': '以管理员身份在终端中打开',
 
     // ExportMenu
     'export.title': '导出任务',
@@ -820,6 +826,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'conv.selected': '{n} selected',
     'conv.contentMatches': 'Content matches',
     'conv.searchingContent': 'Searching content...',
+    'conv.viewFolder': 'By Folder',
+    'conv.viewRecent': 'Recent',
+    'conv.locateInFolder': 'Locate in Folder',
+    'conv.openInExplorer': 'Open in Explorer',
+    'conv.openInTerminal': 'Open in Terminal',
+    'conv.openInTerminalAdmin': 'Open in Terminal as Admin',
 
     // ExportMenu
     'export.title': 'Export task',

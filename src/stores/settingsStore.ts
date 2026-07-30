@@ -112,6 +112,10 @@ interface SettingsState {
   showHiddenFiles: boolean;
   /** Whether Enter sends (false, default) or Ctrl+Enter sends (true) */
   ctrlEnterToSend: boolean;
+  /** Whether Ctrl+Click on a file opens it with the system default app */
+  ctrlClickOpenExternally: boolean;
+  /** Whether to show image thumbnail previews in chat for images < 50MB */
+  showImageThumbnails: boolean;
 
   // ── Custom background (user-uploaded image) ──
   /** Base64 data URL of user-uploaded custom background image, empty = disabled */
@@ -163,6 +167,8 @@ interface SettingsState {
   setUserDisplayName: (name: string) => void;
   toggleHiddenFiles: () => void;
   toggleCtrlEnterToSend: () => void;
+  toggleCtrlClickOpenExternally: () => void;
+  toggleShowImageThumbnails: () => void;
   setCustomBgImage: (image: string) => void;
   setCustomBgSize: (size: 'cover' | 'contain' | 'fill') => void;
   setCustomBgPositionX: (x: number) => void;
@@ -218,6 +224,8 @@ export const useSettingsStore = create<SettingsState>()(
       userDisplayName: '',
       showHiddenFiles: false,
       ctrlEnterToSend: false,
+      ctrlClickOpenExternally: false,
+      showImageThumbnails: false,
       customBgImage: '',
       customBgSize: 'cover',
       customBgPositionX: 50,
@@ -347,10 +355,14 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ showHiddenFiles: !state.showHiddenFiles })),
       toggleCtrlEnterToSend: () =>
         set((state) => ({ ctrlEnterToSend: !state.ctrlEnterToSend })),
+      toggleCtrlClickOpenExternally: () =>
+        set((state) => ({ ctrlClickOpenExternally: !state.ctrlClickOpenExternally })),
+      toggleShowImageThumbnails: () =>
+        set((state) => ({ showImageThumbnails: !state.showImageThumbnails })),
     }),
     {
       name: 'tokenicode-settings',
-      version: 13,
+      version: 14,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
         if (version === 0) {
@@ -423,6 +435,10 @@ export const useSettingsStore = create<SettingsState>()(
         if (version < 13) {
           persisted.ctrlEnterToSend = false;
         }
+        if (version < 14) {
+          persisted.ctrlClickOpenExternally = false;
+          persisted.showImageThumbnails = false;
+        }
         return persisted;
       },
       partialize: (state) => ({
@@ -451,6 +467,8 @@ export const useSettingsStore = create<SettingsState>()(
         userDisplayName: state.userDisplayName,
         showHiddenFiles: state.showHiddenFiles,
         ctrlEnterToSend: state.ctrlEnterToSend,
+        ctrlClickOpenExternally: state.ctrlClickOpenExternally,
+        showImageThumbnails: state.showImageThumbnails,
         customBgImage: state.customBgImage,
         customBgSize: state.customBgSize,
         customBgPositionX: state.customBgPositionX,

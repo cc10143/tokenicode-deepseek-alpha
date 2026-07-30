@@ -246,7 +246,15 @@ function SearchResultItem({
   const isSelected = selectedFile === node.path;
   return (
     <button
-      onClick={() => { if (!node.is_dir) selectFile(node.path); }}
+      onClick={(e) => {
+        if (!node.is_dir) {
+          if ((e.ctrlKey || e.metaKey) && useSettingsStore.getState().ctrlClickOpenExternally) {
+            bridge.openWithDefaultApp(node.path);
+          } else {
+            selectFile(node.path);
+          }
+        }
+      }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, node.path, node.is_dir); }}
       className={`w-full flex items-center gap-2 py-1.5 px-3 rounded-lg
         text-left text-[13px] transition-smooth group
@@ -314,11 +322,15 @@ function TreeNode({
 
   const isExpanded = expanded;
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
     if (node.is_dir) {
       setExpanded(!expanded);
     } else {
-      selectFile(node.path);
+      if ((e.ctrlKey || e.metaKey) && useSettingsStore.getState().ctrlClickOpenExternally) {
+        bridge.openWithDefaultApp(node.path);
+      } else {
+        selectFile(node.path);
+      }
     }
   };
 

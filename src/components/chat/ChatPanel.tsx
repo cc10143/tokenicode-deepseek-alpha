@@ -876,7 +876,9 @@ export function ChatPanel() {
                   <div className="w-8 flex-shrink-0" />
                 )}
                 <div className="flex-1 min-w-0 text-base text-text-primary leading-relaxed">
-                  <MarkdownRenderer content={partialText} />
+                  <pre className="whitespace-pre-wrap font-sans text-base text-text-primary leading-relaxed m-0">
+                    {partialText}
+                  </pre>
                   <span className="inline-block w-2 h-5 bg-accent ml-0.5
                     animate-pulse-soft rounded-sm shadow-[0_0_8px_var(--color-accent-glow)]" />
                 </div>

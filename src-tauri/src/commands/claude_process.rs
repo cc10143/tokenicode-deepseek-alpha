@@ -39,32 +39,49 @@ impl StdinManager {
     }
 
     pub async fn insert(&self, id: String, stdin: ChildStdin) {
+        log::info!("[TOKENICODE:stdin] StdinManager::insert: session={}", id);
         let mut map = self.handles.lock().await;
         map.insert(id, stdin);
     }
 
     pub async fn send(&self, id: &str, message: &str) -> Result<(), String> {
         let mut map = self.handles.lock().await;
+        let known_ids: Vec<String> = map.keys().cloned().collect();
+        log::info!("[TOKENICODE:stdin] send_stdin: session={}, known_sessions={:?}", id, known_ids);
         if let Some(stdin) = map.get_mut(id) {
             // Atomic write: message + newline in one call to prevent interleaving (P1-2 fix)
             let payload = format!("{}\n", message);
+            log::info!("[TOKENICODE:stdin] send_stdin: writing {} bytes to session={}", payload.len(), id);
             stdin
                 .write_all(payload.as_bytes())
                 .await
-                .map_err(|e| format!("Failed to write to stdin: {}", e))?;
+                .map_err(|e| {
+                    log::error!("[TOKENICODE:stdin] send_stdin: write_all FAILED session={}: {}", id, e);
+                    format!("Failed to write to stdin: {}", e)
+                })?;
+            log::info!("[TOKENICODE:stdin] send_stdin: write_all OK session={}, flushing...", id);
             stdin
                 .flush()
                 .await
-                .map_err(|e| format!("Failed to flush stdin: {}", e))?;
+                .map_err(|e| {
+                    log::error!("[TOKENICODE:stdin] send_stdin: flush FAILED session={}: {}", id, e);
+                    format!("Failed to flush stdin: {}", e)
+                })?;
+            log::info!("[TOKENICODE:stdin] send_stdin: flush OK session={}", id);
             Ok(())
         } else {
+            log::warn!("[TOKENICODE:stdin] send_stdin: NO HANDLE for session={}", id);
             Err(format!("No stdin handle for session: {}", id))
         }
     }
 
     pub async fn remove(&self, id: &str) {
         let mut map = self.handles.lock().await;
+        let had = map.contains_key(id);
         map.remove(id);
+        if had {
+            log::info!("[TOKENICODE:stdin] StdinManager::remove: session={}", id);
+        }
     }
 }
 
@@ -86,7 +103,7 @@ impl ProcessManager {
             // Actually kill the child process to prevent zombie leaks (P0-2 fix)
             let mut managed = proc.lock().await;
             if let Err(e) = managed.child.kill().await {
-                eprintln!(
+                log::info!(
                     "[TOKENICODE] Failed to kill process for session {}: {}",
                     id, e
                 );

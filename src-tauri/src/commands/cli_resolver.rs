@@ -180,7 +180,7 @@ pub fn is_valid_executable(path: &Path) -> bool {
                         if !interpreter.is_empty() && Path::new(interpreter).exists() {
                             return true;
                         }
-                        eprintln!(
+                        log::info!(
                             "[cli_resolver] shebang interpreter '{}' not found, skipping {:?}",
                             interpreter, path
                         );
@@ -305,7 +305,7 @@ fn cmd_with_timeout(cmd: &str, args: &[&str], timeout_secs: u64) -> String {
                 if std::time::Instant::now() > deadline {
                     let _ = child.kill();
                     let _ = child.wait();
-                    eprintln!("[cli_resolver] cmd_with_timeout: '{}' timed out ({}s)", cmd, timeout_secs);
+                    log::info!("[cli_resolver] cmd_with_timeout: '{}' timed out ({}s)", cmd, timeout_secs);
                     return String::new();
                 }
                 std::thread::sleep(std::time::Duration::from_millis(20));
@@ -628,7 +628,7 @@ pub fn resolve() -> Option<(String, CliSource)> {
             let candidate = Path::new(&td.path).join(name);
             if is_native_binary(&candidate) {
                 let path = candidate.to_string_lossy().to_string();
-                eprintln!(
+                log::info!(
                     "[cli_resolver] resolved: {} (source: {}, native)",
                     path, td.source
                 );
@@ -640,7 +640,7 @@ pub fn resolve() -> Option<(String, CliSource)> {
             let candidate = Path::new(&td.path).join(name);
             if is_valid_executable(&candidate) {
                 let path = candidate.to_string_lossy().to_string();
-                eprintln!(
+                log::info!(
                     "[cli_resolver] resolved: {} (source: {}, script)",
                     path, td.source
                 );
@@ -649,7 +649,7 @@ pub fn resolve() -> Option<(String, CliSource)> {
         }
     }
 
-    eprintln!("[cli_resolver] no CLI binary found");
+    log::info!("[cli_resolver] no CLI binary found");
     None
 }
 
@@ -784,7 +784,7 @@ pub fn cleanup(targets: &[String]) -> CleanupResult {
             // Safe to auto-delete
             match std::fs::remove_file(path) {
                 Ok(()) => {
-                    eprintln!("[cli_resolver] removed: {}", target);
+                    log::info!("[cli_resolver] removed: {}", target);
                     removed.push(target.clone());
                 }
                 Err(e) => {
@@ -827,14 +827,14 @@ pub fn cleanup(targets: &[String]) -> CleanupResult {
             if claude_pkg.exists() {
                 match std::fs::remove_dir_all(&claude_pkg) {
                     Ok(()) => {
-                        eprintln!(
+                        log::info!(
                             "[cli_resolver] removed npm package: {}",
                             claude_pkg.display()
                         );
                         removed.push(claude_pkg.to_string_lossy().to_string());
                     }
                     Err(e) => {
-                        eprintln!(
+                        log::info!(
                             "[cli_resolver] failed to remove npm package: {}",
                             e
                         );
@@ -897,7 +897,7 @@ pub fn find_binary() -> Option<String> {
         if is_native_binary(p) || is_valid_executable(p) {
             return Some(pinned);
         }
-        eprintln!("[cli_resolver] pinned CLI '{}' is no longer valid, falling back", pinned);
+        log::info!("[cli_resolver] pinned CLI '{}' is no longer valid, falling back", pinned);
     }
     resolve().map(|(path, _)| path)
 }
@@ -938,7 +938,7 @@ pub fn pin_cli(path: &str) -> Result<(), String> {
         .map_err(|e| format!("JSON error: {}", e))?;
     std::fs::write(&pin_path, json)
         .map_err(|e| format!("Failed to write pin file: {}", e))?;
-    eprintln!("[cli_resolver] pinned CLI: {}", path);
+    log::info!("[cli_resolver] pinned CLI: {}", path);
     Ok(())
 }
 
@@ -948,7 +948,7 @@ pub fn unpin_cli() -> Result<(), String> {
         if pin_path.exists() {
             std::fs::remove_file(&pin_path)
                 .map_err(|e| format!("Failed to remove pin file: {}", e))?;
-            eprintln!("[cli_resolver] unpinned CLI");
+            log::info!("[cli_resolver] unpinned CLI");
         }
     }
     Ok(())
@@ -1063,7 +1063,7 @@ pub fn delete_cli(path: &str) -> Result<String, String> {
         }
     }
 
-    eprintln!("[cli_resolver] deleted CLI: {} (source: {})", path, source);
+    log::info!("[cli_resolver] deleted CLI: {} (source: {})", path, source);
     Ok(format!("Deleted {}", path))
 }
 

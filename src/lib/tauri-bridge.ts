@@ -304,6 +304,9 @@ export const bridge = {
   sendRawStdin: (sessionId: string, message: string) =>
     invoke<void>('send_raw_stdin', { sessionId, message }),
 
+  frontendLog: (message: string) =>
+    invoke<void>('frontend_log', { message }).catch(() => {}),
+
   killSession: (sessionId: string) =>
     invoke<void>('kill_session', { sessionId }),
 

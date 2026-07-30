@@ -671,6 +671,7 @@ export function InputBar() {
   const handleSubmit = useCallback(async () => {
     // Capture tabId at the start of submission
     let tabId = useSessionStore.getState().selectedSessionId;
+    bridge.frontendLog(`handleSubmit: entry tabId=${tabId || 'null'} stdinId=${useChatStore.getState().getTab(tabId || '')?.sessionMeta.stdinId || 'undefined'}`);
     if (!tabId) {
       if (!workingDirectory) return;
       tabId = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -876,6 +877,7 @@ export function InputBar() {
       const submitTabState = getActiveTabState();
       let stdinId = submitTabState.sessionMeta.stdinId;
       let sentViaStdin = false;
+      bridge.frontendLog(`handleSubmit: decision stdinId=${stdinId || 'undefined'}`);
 
       if (stdinId) {
         // Check if API provider config changed since this process was spawned (TK-303).

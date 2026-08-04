@@ -52,3 +52,21 @@ forked from mistydew/tokenicode-deepseek-alpha。
 - 新增 changelog 面板 + 多个单元测试
 
 **验证**：cargo check + 前端 tsc 通过；完整 `pnpm tauri build` 成功生成 exe 和 MSI/NSIS 安装包（updater 签名失败是已知问题）。版本号 1.0.6 → 1.0.7。
+
+## 2026-08-05 AskUserQuestion 选项 preview 渲染（issue #2）
+
+**问题**：AskUserQuestion 选项的 `preview` 字段（聚焦/hover 选项时显示的预览内容）不渲染。`label`/`description` 正常，`preview` 完全无显示。
+
+**根因**：不是传参问题——`useStreamProcessor.ts` 和 `session-loader.ts` 都是把 `input.questions` 原样透传，运行时 `preview` 本来就到达前端。缺的是：① `QuestionOption` 类型没声明 `preview`（TS 拦截）；② QuestionCard 渲染处只处理 `label`+`description`。
+
+**修复**（`QuestionCard.tsx` + `chatStore.ts` + `i18n.ts`）：
+- 新增 `hoverIdx` 状态，选项按钮挂 `onMouseEnter`/`onFocus`/`onBlur` 追踪聚焦选项
+- 选项列表下方渲染 preview 区块，CSS 组合保障全文可读：
+  - `whitespace-pre-wrap` — 保留换行/空格，ASCII art 不变形
+  - `overflow-wrap: break-word` — 超长 URL 横向断行，不溢出
+  - `max-h-32` + `overflow-y-auto` — 超长内容内部滚动可读，**不裁切**
+- 选项容器 `onMouseLeave` 清空 hover：鼠标从选项移到 preview（同容器内）时预览保持，可滚动
+- 附带修复：选项 label 加 `break-words`——超长无空格 label 在窄宽度下会把卡片撑破（实测 320px 下 scrollW 541 > 317）
+- `QuestionOption` 补 `preview?: string`；i18n 新增 `msg.questionPreview`（中英）
+
+**验证**：tsc + vite build 通过；编译 CSS 确认 `.break-words{overflow-wrap:break-word}` 生成。用复刻 preview 区块的独立 HTML + BrowserClaw `evaluate` 量化实测四类极端样例（ASCII art / 超长 URL / 40 行日志 / 超长 label），640px 与 320px 两档宽度：无横向溢出、ASCII 空格与换行完整、40 行内容可滚动不裁切。提交 `cd9bce5` 已 push fork。

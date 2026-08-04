@@ -70,3 +70,20 @@ forked from mistydew/tokenicode-deepseek-alpha。
 - `QuestionOption` 补 `preview?: string`；i18n 新增 `msg.questionPreview`（中英）
 
 **验证**：tsc + vite build 通过；编译 CSS 确认 `.break-words{overflow-wrap:break-word}` 生成。用复刻 preview 区块的独立 HTML + BrowserClaw `evaluate` 量化实测四类极端样例（ASCII art / 超长 URL / 40 行日志 / 超长 label），640px 与 320px 两档宽度：无横向溢出、ASCII 空格与换行完整、40 行内容可滚动不裁切。提交 `cd9bce5` 已 push fork。
+
+## 2026-08-05 AskUserQuestion preview hover 劫持 bug → 点击锁定方案
+
+**问题**：preview 区块固定在选项列表**最下方**，内容超长需鼠标滚轮翻动。鼠标从选项区移到预览区滚动的路径必然穿过中间选项——每经过一个 hover 就触发切换，preview 被依次劫持，最终显示最后经过的选项内容。
+
+**根因**：preview 由 hover 被动跟随，而"滚动预览需要鼠标停留"——结构性冲突，不是偶发。
+
+**方案（用户提出，已实施）**：preview 从 hover 跟随改为**点击锁定**：
+- 未锁定：hover 跟随（保留快速浏览）
+- **点击选项 → 锁定** preview 到该选项（标题显示锁图标 + 来源选项名），此后 hover 其他选项不切换 → 滚动预览稳定
+- **再点一次已锁定选项 → 解锁**，回 hover 模式
+- 多选：preview 显示**最后点击**的选项（不绑定选择集）
+- 键盘 Enter 走按钮 onClick，同锁定逻辑；切题（handleConfirm 非最后一题）时重置 `lockedIdx`/`hoverIdx`，避免残留到下一题
+
+**实现**：`lockedIdx: number | null` 状态，`activePreviewIdx = lockedIdx ?? hoverIdx`；handleToggle 里 `setLockedIdx(prev => prev === optIdx ? null : optIdx)`。
+
+**验证**：tsc 通过；构建覆盖便携版，用户复测确认。commit `64c7290` 已 push fork。

@@ -35,9 +35,11 @@ export function QuestionCard({ message, floating }: Props) {
   const [useOther, setUseOther] = useState<Record<number, boolean>>({});
   const [answeredMap, setAnsweredMap] = useState<Record<number, string>>({});
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [lockedIdx, setLockedIdx] = useState<number | null>(null);
 
   const currentQ = questions[currentIdx];
   const isFullyResolved = message.resolved;
+  const activePreviewIdx = lockedIdx ?? hoverIdx;
 
   const handleToggle = useCallback((optIdx: number, multi: boolean) => {
     if (isFullyResolved) return;
@@ -55,6 +57,9 @@ export function QuestionCard({ message, floating }: Props) {
       setUseOther((p) => ({ ...p, [qIdx]: false }));
       return { ...prev, [qIdx]: next };
     });
+    // Click toggles preview lock: clicking the currently-locked option unlocks
+    // (back to hover-follow), clicking any other option locks preview to it.
+    setLockedIdx((prev) => (prev === optIdx ? null : optIdx));
   }, [isFullyResolved, currentIdx]);
 
   const handleOtherToggle = useCallback(() => {
@@ -139,6 +144,8 @@ export function QuestionCard({ message, floating }: Props) {
         setInteractionState(qTabId, message.id, 'failed', String(err));
       }
     } else {
+      setHoverIdx(null);
+      setLockedIdx(null);
       setCurrentIdx(currentIdx + 1);
     }
   }, [isFullyResolved, isSending, awaitingSdkPatch, currentIdx, questions, selectedMap, useOther, otherText, message.id, message.permissionData, message.toolInput, getCurrentAnswer]);
@@ -294,14 +301,23 @@ export function QuestionCard({ message, floating }: Props) {
                 {t('msg.questionOther')}
               </button>
 
-              {/* Focused option preview */}
-              {hoverIdx !== null && currentQ.options[hoverIdx]?.preview && (
+              {/* Focused/locked option preview */}
+              {activePreviewIdx !== null && currentQ.options[activePreviewIdx]?.preview && (
                 <div className="mt-1.5 rounded-lg border border-border-subtle bg-bg-secondary/50 px-3 py-2 max-h-32 overflow-y-auto">
-                  <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
-                    {t('msg.questionPreview')}
+                  <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
+                    {lockedIdx !== null && (
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
+                        <rect x="4" y="11" width="16" height="10" rx="2" />
+                        <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                      </svg>
+                    )}
+                    <span>{t('msg.questionPreview')}</span>
+                    <span className="truncate normal-case tracking-normal">
+                      {'·'} {decodeUnicodeEscapes(currentQ.options[activePreviewIdx].label)}
+                    </span>
                   </div>
                   <div className="text-xs text-text-secondary whitespace-pre-wrap break-words">
-                    {decodeUnicodeEscapes(currentQ.options[hoverIdx].preview)}
+                    {decodeUnicodeEscapes(currentQ.options[activePreviewIdx].preview)}
                   </div>
                 </div>
               )}

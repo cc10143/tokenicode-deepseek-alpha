@@ -1696,6 +1696,7 @@ async fn start_claude_session(
         let mut lines = reader.lines();
         let mut line_count: u64 = 0;
         let mut emit_fail_count: u32 = 0;
+        let mut emit_fail_start: Option<std::time::Instant> = None;
         let mut post_stdin_lines: u32 = 0;
         let spawn_time = std::time::Instant::now();
         loop {
@@ -1831,7 +1832,18 @@ async fn start_claude_session(
                                 "description": description,
                                 "tool_use_id": tool_use_id,
                             });
-                            let _ = emit_to_frontend(&app_clone, &stream_event, perm_payload);
+                            // 不再静默吞掉 emit 失败（原 `let _ =`）——计入失败计数并打日志，
+                            // 否则 AskUserQuestion 的 permission 事件失败会无痕丢失（"回答了收不到"）。
+                            if let Err(e) = emit_to_frontend(&app_clone, &stream_event, perm_payload) {
+                                emit_fail_count += 1;
+                                if emit_fail_count == 1 {
+                                    emit_fail_start = Some(std::time::Instant::now());
+                                    log::info!("[TOKENICODE] permission emit failed (first, tool={}, request_id={}): {e}", tool_name, request_id);
+                                }
+                            } else {
+                                emit_fail_count = 0;
+                                emit_fail_start = None;
+                            }
                             continue; // Don't forward to stream as normal msg
                         }
                         "hook_callback" => {
@@ -1907,15 +1919,37 @@ async fn start_claude_session(
             };
             if let Err(e) = emit_to_frontend(&app_clone, &stream_event, json_to_emit) {
                 emit_fail_count += 1;
-                log::info!("[TOKENICODE] emit_to_frontend failed (#{emit_fail_count}): {e}");
-                // If emit fails repeatedly, the frontend is likely unreachable.
-                // Break the loop to trigger process_exit cleanup (#64).
-                if emit_fail_count >= 10 {
-                    log::error!("[TOKENICODE:CRITICAL] {} consecutive emit failures — frontend unreachable, stopping stream", emit_fail_count);
-                    break;
+                if emit_fail_count == 1 {
+                    emit_fail_start = Some(std::time::Instant::now());
+                    log::info!("[TOKENICODE] emit_to_frontend failed (first): {e}");
+                } else if emit_fail_count % 20 == 0 {
+                    log::info!(
+                        "[TOKENICODE] emit_to_frontend failed {} times, elapsed={}ms (session={})",
+                        emit_fail_count,
+                        emit_fail_start.map(|s| s.elapsed().as_millis()).unwrap_or(0),
+                        sid_clone
+                    );
+                }
+                // 短暂 IPC 抖动（webview 忙/GC/资源尖峰）不该杀死 reader——那会导致
+                // CLI 进程还活着但前端收不到任何输出（"通信中断需按停止"）。
+                // 只在持续失败 60s（前端真正失联）才放弃并触发 process_exit 清理。
+                if let Some(start) = emit_fail_start {
+                    if start.elapsed().as_secs() >= 60 {
+                        log::error!("[TOKENICODE:CRITICAL] emit failed for 60s continuously ({} attempts, session={}) — frontend unreachable, stopping stream", emit_fail_count, sid_clone);
+                        break;
+                    }
                 }
             } else {
+                if emit_fail_count > 0 {
+                    log::info!(
+                        "[TOKENICODE] emit recovered after {} failures ({}s, session={})",
+                        emit_fail_count,
+                        emit_fail_start.map(|s| s.elapsed().as_secs()).unwrap_or(0),
+                        sid_clone
+                    );
+                }
                 emit_fail_count = 0;  // reset on success
+                emit_fail_start = None;
             }
         }
         // Emit process_exit on the stream channel (primary detection)

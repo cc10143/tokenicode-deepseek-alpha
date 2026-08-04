@@ -105,15 +105,17 @@ export function QuestionCard({ message, floating }: Props) {
       if (!stdinId) return;
       const answers: Record<string, string> = {};
       questions.forEach((q, qIdx) => {
+        // AskUserQuestion 的 answers 键必须是 question 文本（SDK 协议要求），
+        // 不是索引。用索引会让 claude 解析成 "The user did not answer the questions."
         if (useOther[qIdx] && otherText[qIdx]?.trim()) {
-          answers[String(qIdx)] = otherText[qIdx].trim();
+          answers[q.question] = otherText[qIdx].trim();
         } else {
           const selected = selectedMap[qIdx] || new Set<number>();
           const labels = Array.from(selected)
             .map((i) => q.options[i]?.label)
             .filter(Boolean);
           if (labels.length > 0) {
-            answers[String(qIdx)] = labels.join(', ');
+            answers[q.question] = labels.join(', ');
           }
         }
       });

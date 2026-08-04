@@ -12,6 +12,15 @@
 - Windows 上 Provider 与 Skills 翻译 API Key 的加密主密钥改由 DPAPI 绑定当前用户保护，旧 Provider 密钥和旧的本地存储翻译配置会自动迁移；运行日志不再输出参数、PATH、环境变量值和带凭据的代理地址。
 - 保留 v1.0.6 的头像上传与稳定上下文快照修复；上下文显示继续计入缓存输入 token，不会因重新查看而归零。
 
+### 本地定制（本 fork 专有，基线 v1.0.7）
+
+以下改动为本仓库 fork 相对 upstream 的定制，同步 upstream 时不会被覆盖：
+
+- 文件树改为扁平目录缓存（Explorer 模型）：展开目录时才加载子层，目录刷新按需精确更新，修复 Windows 用户主目录下文件监听触发 CPU 100% 的问题。
+- 通信可靠性修复：权限请求发送失败不再静默吞错（改为可观测），stdout 读取线程改为持续失败 60 秒才放弃，修复"通信中断需按停止重发"和"AskUserQuestion 回答了收不到"。
+- AskUserQuestion 答案格式修复：`answers` 键改用问题文本（原为索引），修复点击选项提交后 Claude 判定"没有回答问题"。
+- MCP 支持 HTTP/SSE 类型：MCP 设置页可配置远程服务器，不再只支持 stdio 命令行类型。
+
 ### v1.0.6
 
 - 修复设置页 AI 头像和用户头像无法从本地上传的问题，选图后可以正常预览、裁剪并保存。
@@ -237,7 +246,7 @@ pnpm tauri build
 在本机使用 MSVC 环境构建的示例：
 
 ```powershell
-cmd /c "call C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat && set PATH=C:\Users\Administrator\.cargo\bin;%PATH% && cd /d D:\TOKENICODE\TOKENICODE-src && pnpm tauri build"
+cmd /c "call C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat && set PATH=C:\Users\Administrator\.cargo\bin;%PATH% && cd /d D:\TOKENICODE\src && pnpm tauri build"
 ```
 
 如果没有 Tauri 签名私钥，安装包签名阶段可能失败，但 `src-tauri\target\release\tokenicode.exe` 仍会生成。

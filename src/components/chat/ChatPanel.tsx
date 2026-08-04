@@ -21,7 +21,7 @@ import { AgentPanel } from '../agents/AgentPanel';
 import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../../lib/tauri-bridge';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useT } from '../../lib/i18n';
-import { envFingerprint, resolveModelForProvider, resolveThinkingLevelForProvider } from '../../lib/api-provider';
+import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveThinkingLevelForProvider } from '../../lib/api-provider';
 import { useProviderStore } from '../../stores/providerStore';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SetupWizard } from '../setup/SetupWizard';
@@ -1031,10 +1031,11 @@ async function startDraftSession(folderPath: string) {
     const contextWindowMode = useSettingsStore.getState().contextWindowMode;
     const providerId = useProviderStore.getState().activeProviderId || null;
     const resolvedModel = resolveModelForProvider(selectedModel);
+    const sendModel = resolveModelForSend(selectedModel);
     const session = await bridge.startSession({
       prompt: '',  // empty = pre-warm, no message sent
       cwd: folderPath,
-      model: resolvedModel,
+      model: sendModel,
       session_id: preWarmId,
       thinking_level: resolveThinkingLevelForProvider(
         selectedModel,

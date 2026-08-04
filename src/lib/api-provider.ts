@@ -1,4 +1,5 @@
 import { useProviderStore } from '../stores/providerStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { PROVIDER_PRESETS } from './provider-presets';
 import type { ModelId } from '../stores/settingsStore';
 import {
@@ -28,7 +29,11 @@ export type ModelResolution =
 export function resolveModelOrError(selectedModel: string): ModelResolution {
   const provider = useProviderStore.getState().getActive();
   if (!provider) {
-    return { ok: true, model: selectedModel };
+    // Inherit mode: surface the model the CLI will actually use (read from
+    // ~/.claude/settings.json) so the UI reflects the system config. Falls back
+    // to the selected model until the async load completes.
+    const inherited = useSettingsStore.getState().inheritedModel;
+    return { ok: true, model: inherited || selectedModel };
   }
 
   // 1. Check direct model ID mapping first (e.g. 'claude-opus-4-6-1m' → 'glm-5-1m')
@@ -80,6 +85,17 @@ export function resolveModelForProvider(selectedModel: string): string {
   const r = resolveModelOrError(selectedModel);
   const model = r.ok ? r.model : selectedModel;
   return CLI_MODEL_MAP[model as ModelId] ?? model;
+}
+
+/**
+ * Model name to pass to the CLI via --model.
+ * In inherit mode (no active provider) returns undefined so the CLI uses its own
+ * settings.json model routing (e.g. CC-Switch) instead of being overridden by
+ * the GUI's model selector.
+ */
+export function resolveModelForSend(selectedModel: string): string | undefined {
+  if (!useProviderStore.getState().getActive()) return undefined;
+  return resolveModelForProvider(selectedModel);
 }
 
 export function supportsDeepSeekThinking(model: string): boolean {

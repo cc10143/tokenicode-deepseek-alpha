@@ -5,6 +5,7 @@ import {
   DEEPSEEK_V4_PRO,
   normalizeProviderModelName,
 } from '../lib/deepseek-models';
+import { bridge } from '../lib/tauri-bridge';
 
 // --- Types ---
 
@@ -140,6 +141,9 @@ interface SettingsState {
   /** Whether the floating agent panel is open */
   agentPanelOpen: boolean;
 
+  /** Effective model read from ~/.claude/settings.json in inherit mode (transient, not persisted) */
+  inheritedModel: string | null;
+
   toggleSidebar: () => void;
   toggleSecondaryPanel: () => void;
   toggleAgentPanel: () => void;
@@ -148,6 +152,8 @@ interface SettingsState {
   toggleSettings: () => void;
   setWorkingDirectory: (dir: string) => void;
   setSelectedModel: (model: string) => void;
+  setInheritedModel: (model: string | null) => void;
+  loadInheritedModel: () => Promise<void>;
   setSessionMode: (mode: SessionMode) => void;
   setLocale: (locale: Locale) => void;
   toggleLocale: () => void;
@@ -205,6 +211,7 @@ export const useSettingsStore = create<SettingsState>()(
       secondaryPanelWidth: 300,
       settingsOpen: false,
       agentPanelOpen: false,
+      inheritedModel: null,
       workingDirectory: '',
       selectedModel: 'claude-sonnet-4-6',
       sessionMode: 'bypass',
@@ -279,6 +286,19 @@ export const useSettingsStore = create<SettingsState>()(
 
       setSelectedModel: (model) =>
         set(() => ({ selectedModel: model })),
+
+      setInheritedModel: (model) =>
+        set(() => ({ inheritedModel: model })),
+
+      loadInheritedModel: async () => {
+        try {
+          const model = await bridge.getCliModelConfig();
+          set(() => ({ inheritedModel: model ?? null }));
+        } catch (e) {
+          console.error('[settingsStore] loadInheritedModel failed:', e);
+          set(() => ({ inheritedModel: null }));
+        }
+      },
 
       setSessionMode: (mode) =>
         set(() => ({ sessionMode: mode })),

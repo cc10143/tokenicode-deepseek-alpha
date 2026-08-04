@@ -403,6 +403,9 @@ export const bridge = {
   getHomeDir: () =>
     invoke<string>('get_home_dir'),
 
+  getCliModelConfig: () =>
+    invoke<string | null>('get_cli_model_config'),
+
   exportSessionMarkdown: (path: string, outputPath: string, conversationOnly = false) =>
     invoke<void>('export_session_markdown', { path, outputPath, conversationOnly }),
 

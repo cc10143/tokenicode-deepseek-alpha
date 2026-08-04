@@ -11,7 +11,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useAgentStore, resolveAgentId, getAgentDepth } from '../stores/agentStore';
 import { useFileStore } from '../stores/fileStore';
 import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../lib/tauri-bridge';
-import { envFingerprint, resolveModelForProvider, resolveThinkingLevelForProvider } from '../lib/api-provider';
+import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveThinkingLevelForProvider } from '../lib/api-provider';
 import { useProviderStore } from '../stores/providerStore';
 import { t } from '../lib/i18n';
 import {
@@ -1717,11 +1717,12 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                 (window as any).__claudeUnlisten = (window as any).__claudeUnlisteners[retryId];
 
                 const retryResolvedModel = resolveModelForProvider(selectedModel);
+                const retrySendModel = resolveModelForSend(selectedModel);
                 const retryContextWindowMode = useSettingsStore.getState().contextWindowMode;
                 const session = await bridge.startSession({
                   prompt: retryText,
                   cwd,
-                  model: retryResolvedModel,
+                  model: retrySendModel,
                   session_id: retryId,
                   // No resume_session_id — fresh start to avoid thinking signature issue
                   thinking_level: resolveThinkingLevelForProvider(

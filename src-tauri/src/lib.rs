@@ -859,6 +859,54 @@ fn providers_path() -> Result<std::path::PathBuf, String> {
     Ok(safe_data_dir()?.join("providers.json"))
 }
 
+/// Strip the local `[1M]` context marker Claude Code uses to declare a 1M window.
+/// The upstream API never accepts this local-only suffix.
+fn strip_one_m_marker(model: &str) -> String {
+    let trimmed = model.trim_end();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with("[1m]") && trimmed.len() >= 4 {
+        trimmed[..trimmed.len() - 4].trim_end().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Read the effective model from ~/.claude/settings.json for inherit mode display.
+/// Resolves the `model` tier (haiku/sonnet/opus) through ANTHROPIC_DEFAULT_{TIER}_MODEL
+/// and strips the [1M] marker, so the GUI shows the same model the CLI would route
+/// when no --model is passed. Returns None when no `model` is configured.
+#[tauri::command]
+fn get_cli_model_config() -> Result<Option<String>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
+    let path = home.join(".claude").join("settings.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+
+    let tier = json
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase);
+    let Some(tier) = tier else {
+        return Ok(None);
+    };
+
+    let env_key = format!("ANTHROPIC_DEFAULT_{}_MODEL", tier.to_uppercase());
+    let model = json
+        .get("env")
+        .and_then(|e| e.get(&env_key))
+        .and_then(serde_json::Value::as_str)
+        .map(|m| strip_one_m_marker(m))
+        .unwrap_or(tier);
+    Ok(Some(model))
+}
+
 // --- Provider credential encryption (TK-303) ---
 // Provider JSON is AES-GCM encrypted with a persistent random master key. On
 // Windows that key is sealed with DPAPI for the current OS user; legacy raw key
@@ -8411,6 +8459,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             start_claude_session,
+            get_cli_model_config,
             preview_open_url,
             preview_refresh,
             preview_back,

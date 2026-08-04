@@ -391,6 +391,7 @@ function App() {
   useEffect(() => {
     useSessionStore.getState().loadCustomPreviewsFromDisk();
     useProviderStore.getState().load();
+    useSettingsStore.getState().loadInheritedModel();
     // Notification permission is requested lazily on first need (see useStreamProcessor.ts)
   }, []);
 

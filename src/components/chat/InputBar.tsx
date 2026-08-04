@@ -21,7 +21,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useT } from '../../lib/i18n';
 import { SlashCommandPopover, getFilteredCommandList } from './SlashCommandPopover';
 import { useCommandStore } from '../../stores/commandStore';
-import { envFingerprint, resolveModelForProvider, resolveModelOrError, resolveThinkingLevelForProvider } from '../../lib/api-provider';
+import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveModelOrError, resolveThinkingLevelForProvider } from '../../lib/api-provider';
 import { useProviderStore } from '../../stores/providerStore';
 import { PROVIDER_PRESETS } from '../../lib/provider-presets';
 import { displayProviderModelName } from '../../lib/deepseek-models';
@@ -962,7 +962,9 @@ export function InputBar() {
           // If so, kill the stale process and fall through to spawn a new one with --resume.
           const currentModel = resolveModelForProvider(selectedModel);
           const spawnedModel = getActiveTabState().sessionMeta.spawnedModel;
-          if (spawnedModel && currentModel !== spawnedModel) {
+          // Inherit mode (no provider): the GUI model doesn't drive the CLI, so a
+          // selector change must not tear down the session.
+          if (useProviderStore.getState().getActive() && spawnedModel && currentModel !== spawnedModel) {
             const oldShort = MODEL_OPTIONS.find((m) => m.id === spawnedModel)?.short ?? displayProviderModelName(spawnedModel);
             const newShort = MODEL_OPTIONS.find((m) => m.id === currentModel)?.short ?? displayProviderModelName(currentModel);
             console.warn(`[TOKENICODE] Model changed (${oldShort} → ${newShort}), killing stale session`);
@@ -1164,12 +1166,13 @@ export function InputBar() {
         const liveThinkingLevel = resolveThinkingLevelForProvider(selectedModel, liveThinkingSetting);
         const liveProviderId = useProviderStore.getState().activeProviderId || null;
         const liveResolvedModel = resolveModelForProvider(selectedModel);
+        const liveSendModel = resolveModelForSend(selectedModel);
         const liveContextWindow = getContextWindowForModel(liveResolvedModel, liveContextWindowMode);
         console.log('[TOKENICODE:session] starting session', { cwd, stdinId: preGeneratedId, mode: liveSessionMode, provider: liveProviderId });
         const session = await bridge.startSession({
           prompt: text,
           cwd,
-          model: liveResolvedModel,
+          model: liveSendModel,
           session_id: preGeneratedId,
           resume_session_id: existingSessionId || undefined,
           thinking_level: liveThinkingLevel,

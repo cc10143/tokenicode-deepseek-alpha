@@ -33,3 +33,22 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **修复**：`src/components/chat/QuestionCard.tsx` 的 handleConfirm 里 `answers[String(qIdx)]` → `answers[q.question]`（含 Other 分支）。handleSkip 用空 answers（跳过，合理）。
 
 **备注**：此坑同样适用于 cc-gui-electron 的极简 QuestionCard（若未来接入 AskUserQuestion 须用 question 文本键）。
+
+## 2026-08-04 Upstream v1.0.7 同步
+
+从 upstream main fetch 到 `c3deffc` 之后 3 个新 commit：
+- `9c3bb65`（v1.0.7，stabilize sessions/models/skills/credentials）→ **cherry-pick**，本地 `61f1244`
+- `32b59dc`（watcher 200ms debounce）、`901738f`（home 目录跳过）→ **跳过**，本地已有同功能 commit（`5407150`/`4ac7af0`）
+
+**lib.rs 8 处冲突全部在日志行**，解决原则：采用 upstream 脱敏文本 + 保留本项目 `log::info!`：
+- 代理日志不再打印 URL（`system HTTPS proxy detected` 等）
+- `start_claude_session` 不再打印 args/PATH/env 全量值——**这是安全修复**，原实现会泄漏 API key 和代理凭据
+- `test_provider_connection` 代理日志同样脱敏
+
+**v1.0.7 带来的主要功能**：
+- Provider 凭据加密升级：Windows 用 DPAPI 密封主密钥（TK-303），legacy raw key 文件自动迁移
+- 流式处理新增 `commitPartialText`：provider 省略最终 assistant 事件时保留 partialText
+- 技能系统重构：`skill-invocation.ts`、skills 面板、skill translation config、`list_all_commands`/`listSkills` 加 `additionalDirs`
+- 新增 changelog 面板 + 多个单元测试
+
+**验证**：cargo check + 前端 tsc 通过；完整 `pnpm tauri build` 成功生成 exe 和 MSI/NSIS 安装包（updater 签名失败是已知问题）。版本号 1.0.6 → 1.0.7。

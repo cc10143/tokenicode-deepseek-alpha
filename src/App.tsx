@@ -16,7 +16,7 @@ import { useChatStore } from './stores/chatStore';
 import { useSessionStore } from './stores/sessionStore';
 import { APP_NAME } from './lib/edition';
 import { useAgentStore } from './stores/agentStore';
-import { bridge, onFileChange } from './lib/tauri-bridge';
+import { bridge, onClaudeStream, onFileChange, onSessionExit } from './lib/tauri-bridge';
 import { useScrollZoom } from './lib/useScrollZoom';
 import { useT } from './lib/i18n';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -137,8 +137,6 @@ function App() {
   const loadTree = useFileStore((s) => s.loadTree);
   const markFileChanged = useFileStore((s) => s.markFileChanged);
   const prevDirRef = useRef<string | null>(null);
-  const homeDirRef = useRef<string>('');
-  const [homeDirReady, setHomeDirReady] = useState(false);
 
   const t = useT();
 
@@ -393,7 +391,6 @@ function App() {
   useEffect(() => {
     useSessionStore.getState().loadCustomPreviewsFromDisk();
     useProviderStore.getState().load();
-    bridge.getHomeDir().then((dir) => { homeDirRef.current = dir; setHomeDirReady(true); }).catch(() => setHomeDirReady(true));
     // Notification permission is requested lazily on first need (see useStreamProcessor.ts)
   }, []);
 
@@ -591,14 +588,6 @@ function App() {
   useEffect(() => {
     if (!workingDirectory) return;
 
-    // Never watch the user's home directory — it has too many system file changes
-    const normalizedHome = homeDirRef.current.replace(/\\/g, '/').replace(/\/$/, '');
-    const normalizedWorkdir = workingDirectory.replace(/\\/g, '/').replace(/\/$/, '');
-    if (normalizedWorkdir === normalizedHome) {
-      console.log('[TOKENICODE] Skipping file watch on home directory:', workingDirectory);
-      return;
-    }
-
     // Unwatch previous directory
     if (prevDirRef.current && prevDirRef.current !== workingDirectory) {
       bridge.unwatchDirectory(prevDirRef.current).catch(() => {});
@@ -612,7 +601,7 @@ function App() {
     return () => {
       bridge.unwatchDirectory(workingDirectory).catch(() => {});
     };
-  }, [workingDirectory, homeDirReady]);
+  }, [workingDirectory]);
 
   // Listen for file change events from the watcher.
   // Only refresh expanded directories — unexpanded dirs load fresh on expand.

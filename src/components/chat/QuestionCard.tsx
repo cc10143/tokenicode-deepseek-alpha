@@ -34,6 +34,7 @@ export function QuestionCard({ message, floating }: Props) {
   const [otherText, setOtherText] = useState<Record<number, string>>({});
   const [useOther, setUseOther] = useState<Record<number, boolean>>({});
   const [answeredMap, setAnsweredMap] = useState<Record<number, string>>({});
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   const currentQ = questions[currentIdx];
   const isFullyResolved = message.resolved;
@@ -250,13 +251,19 @@ export function QuestionCard({ message, floating }: Props) {
             </div>
 
             {/* Options */}
-            <div className="flex flex-col gap-1.5 mb-3">
+            <div
+              className="flex flex-col gap-1.5 mb-3"
+              onMouseLeave={() => setHoverIdx(null)}
+            >
               {currentQ.options.map((opt, optIdx) => {
                 const isSelected = selectedMap[currentIdx]?.has(optIdx) || false;
                 return (
                   <button
                     key={optIdx}
                     onClick={() => handleToggle(optIdx, !!currentQ.multiSelect)}
+                    onMouseEnter={() => setHoverIdx(optIdx)}
+                    onFocus={() => setHoverIdx(optIdx)}
+                    onBlur={() => setHoverIdx(null)}
                     className={`text-left px-3 py-2 rounded-lg text-xs
                       transition-all duration-150 border cursor-pointer
                       hover:scale-[1.01]
@@ -265,7 +272,7 @@ export function QuestionCard({ message, floating }: Props) {
                         : 'border-border-subtle text-text-secondary hover:border-accent/30 hover:bg-bg-secondary/50'
                       }`}
                   >
-                    <span className="font-medium">{decodeUnicodeEscapes(opt.label)}</span>
+                    <span className="font-medium break-words">{decodeUnicodeEscapes(opt.label)}</span>
                     {opt.description && (
                       <span className="text-text-tertiary ml-1.5">{'\u2014'} {decodeUnicodeEscapes(opt.description)}</span>
                     )}
@@ -286,6 +293,18 @@ export function QuestionCard({ message, floating }: Props) {
               >
                 {t('msg.questionOther')}
               </button>
+
+              {/* Focused option preview */}
+              {hoverIdx !== null && currentQ.options[hoverIdx]?.preview && (
+                <div className="mt-1.5 rounded-lg border border-border-subtle bg-bg-secondary/50 px-3 py-2 max-h-32 overflow-y-auto">
+                  <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
+                    {t('msg.questionPreview')}
+                  </div>
+                  <div className="text-xs text-text-secondary whitespace-pre-wrap break-words">
+                    {decodeUnicodeEscapes(currentQ.options[hoverIdx].preview)}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Other text input */}

@@ -7,6 +7,7 @@ import type { FileAttachment } from '../hooks/useFileAttachments';
 export interface QuestionOption {
   label: string;
   description?: string;
+  preview?: string;  // focused preview content from AskUserQuestion tool input
 }
 
 export interface UserQuestion {

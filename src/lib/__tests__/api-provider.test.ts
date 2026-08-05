@@ -14,9 +14,10 @@ describe('provider model resolution', () => {
     expect(resolveModelForProvider('claude-sonnet-4-6')).toBe('claude-sonnet-4-6');
   });
 
-  it('shows the inherited system model when no provider is active', () => {
-    useSettingsStore.setState({ inheritedModel: 'claude-haiku-4-5' });
-    expect(resolveModelForProvider('claude-sonnet-4-6')).toBe('claude-haiku-4-5');
+  it('maps each GUI model to its upstream name in inherit mode', () => {
+    useSettingsStore.setState({ modelMappings: { opus: 'minimax-m2.5', sonnet: 'deepseek-v4-pro', haiku: 'deepseek-v4-flash' } });
+    expect(resolveModelForProvider('claude-sonnet-4-6')).toBe('deepseek-v4-pro');
+    expect(resolveModelForProvider('claude-opus-4-6')).toBe('minimax-m2.5');
   });
 
   it('omits the model in inherit mode so the CLI uses system config', () => {

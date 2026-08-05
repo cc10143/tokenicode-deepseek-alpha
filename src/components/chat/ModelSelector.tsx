@@ -26,6 +26,7 @@ interface DisplayOption {
 export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const setSelectedModel = useSettingsStore((s) => s.setSelectedModel);
+  const modelMappings = useSettingsStore((s) => s.modelMappings);
   const activeProvider = useProviderStore((s) => {
     if (!s.activeProviderId) return null;
     return s.providers.find((p) => p.id === s.activeProviderId) ?? null;
@@ -48,6 +49,19 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // Build display options: official Claude models + extra models from provider.
   // Deduplicate: if multiple Claude models map to the same provider model, keep only the first.
   const displayOptions = useMemo((): DisplayOption[] => {
+    // Inherit mode: show upstream model names from settings.json
+    if (!activeProvider && modelMappings) {
+      return MODEL_OPTIONS.map((m) => {
+        const tier = TIER_MAP[m.id];
+        const upstream = tier ? modelMappings[tier] : undefined;
+        if (upstream) {
+          const label = `${m.short} → ${upstream}`;
+          return { id: m.id, label, short: upstream, mapped: true, isExtra: false };
+        }
+        return { id: m.id, label: m.label, short: m.short, mapped: false, isExtra: false };
+      });
+    }
+
     if (!activeProvider || activeProvider.modelMappings.length === 0) {
       return MODEL_OPTIONS.map((m) => ({ id: m.id, label: m.label, short: m.short, mapped: false, isExtra: false }));
     }
@@ -81,7 +95,7 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
       });
 
     return [...official, ...extras];
-  }, [activeProvider]);
+  }, [activeProvider, modelMappings]);
 
   const fallbackOption = displayOptions.find((option) => option.mapped) || displayOptions[0];
 

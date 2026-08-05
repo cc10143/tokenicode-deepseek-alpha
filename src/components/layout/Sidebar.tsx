@@ -1,21 +1,14 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useSettingsStore, MODEL_OPTIONS } from '../../stores/settingsStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useChatStore, useActiveTab } from '../../stores/chatStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { ConversationList } from '../conversations/ConversationList';
 import { useT } from '../../lib/i18n';
 import { useAgentStore } from '../../stores/agentStore';
 import { IS_ALPHA } from '../../lib/edition';
-import { displayProviderModelName } from '../../lib/deepseek-models';
-import { resolveModelForProvider } from '../../lib/api-provider';
+import { resolveModelForProvider, resolveModelDisplay } from '../../lib/api-provider';
 import { ProfileStatsModal } from '../profile/ProfileStatsModal';
-
-/** Map raw model ID to friendly display name */
-function getModelDisplayName(modelId: string): string {
-  const option = MODEL_OPTIONS.find((m) => modelId === m.id);
-  return option?.short || displayProviderModelName(modelId);
-}
 
 /** Format token count: 1234 → "1.2k", 123456 → "123k", 1234567 → "1.2M" */
 function formatTokenCount(n: number): string {
@@ -155,7 +148,7 @@ export function Sidebar() {
               : sessionStatus === 'error' ? 'bg-error'
               : 'bg-text-tertiary'}`} />
           <span className="text-xs font-medium text-text-primary truncate">
-            {getModelDisplayName(sessionMeta.model || resolveModelForProvider(useSettingsStore.getState().selectedModel))}
+            {resolveModelDisplay(resolveModelForProvider(useSettingsStore.getState().selectedModel) || sessionMeta.model)}
           </span>
           {(sessionMeta.totalInputTokens || sessionMeta.totalOutputTokens
             || sessionMeta.inputTokens || sessionMeta.outputTokens) ? (

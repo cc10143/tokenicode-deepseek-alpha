@@ -392,6 +392,7 @@ function App() {
     useSessionStore.getState().loadCustomPreviewsFromDisk();
     useProviderStore.getState().load();
     useSettingsStore.getState().loadInheritedModel();
+    useSettingsStore.getState().loadModelMappings();
     // Notification permission is requested lazily on first need (see useStreamProcessor.ts)
   }, []);
 

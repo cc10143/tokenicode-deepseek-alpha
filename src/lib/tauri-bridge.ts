@@ -406,6 +406,9 @@ export const bridge = {
   getCliModelConfig: () =>
     invoke<string | null>('get_cli_model_config'),
 
+  getCliModelMappings: () =>
+    invoke<string | null>('get_cli_model_mappings'),
+
   exportSessionMarkdown: (path: string, outputPath: string, conversationOnly = false) =>
     invoke<void>('export_session_markdown', { path, outputPath, conversationOnly }),
 

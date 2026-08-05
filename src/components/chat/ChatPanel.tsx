@@ -8,7 +8,6 @@ import { ExportMenu } from '../conversations/ExportMenu';
 import { UpdateButton } from '../shared/UpdateButton';
 import {
   useSettingsStore,
-  MODEL_OPTIONS,
   mapSessionModeToPermissionMode,
   getContextWindowForModel,
   getAutoCompactThreshold,
@@ -21,7 +20,7 @@ import { AgentPanel } from '../agents/AgentPanel';
 import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../../lib/tauri-bridge';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useT } from '../../lib/i18n';
-import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveThinkingLevelForProvider } from '../../lib/api-provider';
+import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveModelDisplay, resolveThinkingLevelForProvider } from '../../lib/api-provider';
 import { useProviderStore } from '../../stores/providerStore';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SetupWizard } from '../setup/SetupWizard';
@@ -134,11 +133,6 @@ function PlanPanel({ planMessages, onClose }: {
   );
 }
 
-/** Map raw model ID to friendly display name */
-function getModelDisplayName(modelId: string): string {
-  const option = MODEL_OPTIONS.find((m) => modelId === m.id);
-  return option?.short || displayProviderModelName(modelId);
-}
 
 
 /** Format token count: "3.2k" for >=1000, raw number for <1000 */
@@ -683,7 +677,7 @@ export function ChatPanel() {
         <div className="flex items-center gap-3 pointer-events-none">
           {sessionMeta.model && (
             <span className="text-sm font-medium text-text-muted">
-              {getModelDisplayName(sessionMeta.model)}
+              {resolveModelDisplay(sessionMeta.model)}
             </span>
           )}
           {workingDirectory && (

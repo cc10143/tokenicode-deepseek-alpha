@@ -143,6 +143,8 @@ interface SettingsState {
 
   /** Effective model read from ~/.claude/settings.json in inherit mode (transient, not persisted) */
   inheritedModel: string | null;
+  /** All tier→model_name mappings from settings.json (inherit mode dropdown). */
+  modelMappings: Record<string, string> | null;
 
   toggleSidebar: () => void;
   toggleSecondaryPanel: () => void;
@@ -154,6 +156,7 @@ interface SettingsState {
   setSelectedModel: (model: string) => void;
   setInheritedModel: (model: string | null) => void;
   loadInheritedModel: () => Promise<void>;
+  loadModelMappings: () => Promise<void>;
   setSessionMode: (mode: SessionMode) => void;
   setLocale: (locale: Locale) => void;
   toggleLocale: () => void;
@@ -212,6 +215,7 @@ export const useSettingsStore = create<SettingsState>()(
       settingsOpen: false,
       agentPanelOpen: false,
       inheritedModel: null,
+      modelMappings: null,
       workingDirectory: '',
       selectedModel: 'claude-sonnet-4-6',
       sessionMode: 'bypass',
@@ -294,9 +298,23 @@ export const useSettingsStore = create<SettingsState>()(
         try {
           const model = await bridge.getCliModelConfig();
           set(() => ({ inheritedModel: model ?? null }));
+          bridge.frontendLog(`[settingsStore] loadInheritedModel: ${model ?? 'null'}`);
         } catch (e) {
-          console.error('[settingsStore] loadInheritedModel failed:', e);
+          bridge.frontendLog(`[settingsStore] loadInheritedModel failed: ${String(e)}`);
           set(() => ({ inheritedModel: null }));
+        }
+      },
+
+      loadModelMappings: async () => {
+        try {
+          const raw = await bridge.getCliModelMappings();
+          if (raw) {
+            const parsed = JSON.parse(raw) as Record<string, string>;
+            set(() => ({ modelMappings: parsed }));
+            bridge.frontendLog(`[settingsStore] loadModelMappings: ${Object.keys(parsed).length} tiers`);
+          }
+        } catch (e) {
+          bridge.frontendLog(`[settingsStore] loadModelMappings failed: ${String(e)}`);
         }
       },
 

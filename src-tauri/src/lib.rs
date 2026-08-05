@@ -872,14 +872,14 @@ fn strip_one_m_marker(model: &str) -> String {
 }
 
 /// Read the effective model from ~/.claude/settings.json for inherit mode display.
-/// Resolves the `model` tier (haiku/sonnet/opus) through ANTHROPIC_DEFAULT_{TIER}_MODEL
-/// and strips the [1M] marker, so the GUI shows the same model the CLI would route
-/// when no --model is passed. Returns None when no `model` is configured.
+/// Resolves the `model` tier (haiku/sonnet/opus) through ANTHROPIC_DEFAULT_{TIER}_MODEL_NAME
+/// so the GUI shows the upstream model name (e.g. deepseek-v4-flash) that CC-Switch uses.
 #[tauri::command]
 fn get_cli_model_config() -> Result<Option<String>, String> {
     let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
     let path = home.join(".claude").join("settings.json");
     if !path.exists() {
+        log::info!("[get_cli_model_config] settings.json not found at {}", path.display());
         return Ok(None);
     }
     let text = std::fs::read_to_string(&path)
@@ -894,17 +894,54 @@ fn get_cli_model_config() -> Result<Option<String>, String> {
         .filter(|s| !s.is_empty())
         .map(str::to_lowercase);
     let Some(tier) = tier else {
+        log::info!("[get_cli_model_config] no model tier in settings.json");
         return Ok(None);
     };
 
-    let env_key = format!("ANTHROPIC_DEFAULT_{}_MODEL", tier.to_uppercase());
+    let env_key = format!("ANTHROPIC_DEFAULT_{}_MODEL_NAME", tier.to_uppercase());
     let model = json
         .get("env")
         .and_then(|e| e.get(&env_key))
         .and_then(serde_json::Value::as_str)
-        .map(|m| strip_one_m_marker(m))
-        .unwrap_or(tier);
-    Ok(Some(model))
+        .map(strip_one_m_marker);
+    match &model {
+        Some(m) => log::info!("[get_cli_model_config] tier={tier} env_key={env_key} resolved={m}"),
+        None => log::info!("[get_cli_model_config] tier={tier} env_key={env_key} not found in env"),
+    }
+    Ok(model.map(|m| m.to_string()).or(Some(tier)))
+}
+
+/// Read all tier→model_name mappings from ~/.claude/settings.json for inherit mode dropdown.
+/// Returns a JSON map like {"opus":"minimax-m2.5","sonnet":"deepseek-v4-pro","haiku":"deepseek-v4-flash"}.
+#[tauri::command]
+fn get_cli_model_mappings() -> Result<Option<String>, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
+    let path = home.join(".claude").join("settings.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+
+    let env = match json.get("env") {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let mut map = serde_json::Map::new();
+    for tier in &["opus", "sonnet", "haiku"] {
+        let key = format!("ANTHROPIC_DEFAULT_{}_MODEL_NAME", tier.to_uppercase());
+        if let Some(val) = env.get(&key).and_then(serde_json::Value::as_str) {
+            map.insert(tier.to_string(), serde_json::Value::String(val.to_string()));
+        }
+    }
+    if map.is_empty() {
+        return Ok(None);
+    }
+    let result = serde_json::Value::Object(map);
+    Ok(Some(serde_json::to_string(&result).unwrap_or_default()))
 }
 
 // --- Provider credential encryption (TK-303) ---
@@ -8460,6 +8497,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_claude_session,
             get_cli_model_config,
+            get_cli_model_mappings,
             preview_open_url,
             preview_refresh,
             preview_back,

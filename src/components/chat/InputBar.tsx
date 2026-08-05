@@ -21,7 +21,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useT } from '../../lib/i18n';
 import { SlashCommandPopover, getFilteredCommandList } from './SlashCommandPopover';
 import { useCommandStore } from '../../stores/commandStore';
-import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveModelOrError, resolveThinkingLevelForProvider } from '../../lib/api-provider';
+import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveModelDisplay, resolveModelOrError, resolveThinkingLevelForProvider } from '../../lib/api-provider';
 import { useProviderStore } from '../../stores/providerStore';
 import { PROVIDER_PRESETS } from '../../lib/provider-presets';
 import { displayProviderModelName } from '../../lib/deepseek-models';
@@ -442,11 +442,6 @@ export function InputBar() {
     // Always clear the input box first
     setInputSync('');
 
-    // Helper: resolve model ID to display name
-    const modelLabel = (id: string | undefined): string => {
-      if (!id) return '—';
-      return MODEL_OPTIONS.find((m) => m.id === id)?.label || displayProviderModelName(id);
-    };
 
     // Helper: add a structured command feedback message
     const feedback = (
@@ -508,7 +503,7 @@ export function InputBar() {
           command: '/cost',
           title: t('cmd.costTitle'),
           rows: [
-            { label: t('cmd.costModel'), value: modelLabel(meta.model || useSettingsStore.getState().selectedModel) },
+            { label: t('cmd.costModel'), value: resolveModelDisplay(meta.model || useSettingsStore.getState().selectedModel) },
             { label: t('cmd.costAmount'), value: meta.cost != null ? `$${meta.cost.toFixed(4)}` : '—' },
             { label: t('cmd.costDuration'), value: meta.duration != null ? `${(meta.duration / 1000).toFixed(1)}s` : '—' },
             { label: t('cmd.costTurns'), value: meta.turns != null ? String(meta.turns) : '—' },
@@ -535,7 +530,7 @@ export function InputBar() {
             command: '/usage',
             title: t('cmd.usageTitle'),
             rows: [
-              { label: t('cmd.costModel'), value: modelLabel(meta.model || useSettingsStore.getState().selectedModel) },
+              { label: t('cmd.costModel'), value: resolveModelDisplay(meta.model || useSettingsStore.getState().selectedModel) },
               { label: t('cmd.costTurns'), value: meta.turns != null ? String(meta.turns) : '—' },
               { label: t('cmd.usageTotalSession'), value: totalInput || totalOutput
                 ? `${totalInput.toLocaleString()} in / ${totalOutput.toLocaleString()} out`
@@ -556,7 +551,7 @@ export function InputBar() {
             command: '/usage',
             title: t('cmd.usageTitle'),
             rows: [
-              { label: t('cmd.costModel'), value: modelLabel(meta.model || useSettingsStore.getState().selectedModel) },
+              { label: t('cmd.costModel'), value: resolveModelDisplay(meta.model || useSettingsStore.getState().selectedModel) },
               { label: `${t('cmd.usageCurrentTurn')} — ${t('cmd.usageInput')}`, value: turnInput.toLocaleString() },
               { label: `${t('cmd.usageCurrentTurn')} — ${t('cmd.usageOutput')}`, value: turnOutput.toLocaleString() },
               { label: `${t('cmd.usageTotalSession')} — ${t('cmd.usageInput')}`, value: totalInput.toLocaleString() },

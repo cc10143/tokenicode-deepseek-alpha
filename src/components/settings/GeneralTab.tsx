@@ -12,6 +12,7 @@ import {
 import { useProviderStore } from '../../stores/providerStore';
 import { useT } from '../../lib/i18n';
 import { displayProviderModelName } from '../../lib/deepseek-models';
+import { resolveModelForProvider } from '../../lib/api-provider';
 import { AiAvatar } from '../shared/AiAvatar';
 import { UserAvatar } from '../shared/UserAvatar';
 import { AvatarCropModal } from './AvatarCropModal';
@@ -178,11 +179,7 @@ export function GeneralTab() {
   const userFileInputRef = useRef<HTMLInputElement>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [cropTarget, setCropTarget] = useState<'ai' | 'user'>('ai');
-  const selectedTier = TIER_MAP[selectedModel];
-  const selectedMapping = selectedTier
-    ? activeProvider?.modelMappings.find((m) => m.tier === selectedTier)
-    : undefined;
-  const actualModel = selectedMapping?.providerModel || selectedModel;
+  const actualModel = resolveModelForProvider(selectedModel);
   const contextWindow = getContextWindowForModel(actualModel, contextWindowMode);
   const compactThreshold = getAutoCompactThreshold(actualModel, contextWindowMode, autoCompactThresholdTokens);
   const tierMappings = activeProvider?.modelMappings
@@ -468,7 +465,12 @@ export function GeneralTab() {
                   </svg>
                 )}
                 {(() => {
-                  if (!activeProvider) return model.short;
+                  if (!activeProvider) {
+                    const mappings = useSettingsStore.getState().modelMappings;
+                    const tier = TIER_MAP[model.id];
+                    if (mappings && tier && mappings[tier]) return mappings[tier];
+                    return model.short;
+                  }
                   const tier = TIER_MAP[model.id];
                   const mapping = activeProvider.modelMappings.find((mm) => mm.tier === tier);
                   return mapping?.providerModel ? displayProviderModelName(mapping.providerModel) : model.short;

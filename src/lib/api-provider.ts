@@ -6,6 +6,7 @@ import {
   DEEPSEEK_V4_FLASH,
   DEEPSEEK_V4_PRO,
   normalizeProviderModelName,
+  displayProviderModelName,
 } from './deepseek-models';
 
 const TIER_MAP: Record<string, 'opus' | 'sonnet' | 'haiku'> = {
@@ -29,11 +30,17 @@ export type ModelResolution =
 export function resolveModelOrError(selectedModel: string): ModelResolution {
   const provider = useProviderStore.getState().getActive();
   if (!provider) {
-    // Inherit mode: surface the model the CLI will actually use (read from
-    // ~/.claude/settings.json) so the UI reflects the system config. Falls back
-    // to the selected model until the async load completes.
-    const inherited = useSettingsStore.getState().inheritedModel;
-    return { ok: true, model: inherited || selectedModel };
+    // Inherit mode: map each Claude model ID to its upstream name via
+    // settings.json _MODEL_NAME. The user can switch tiers in the GUI
+    // without changing the CLI's actual routing (resolveModelForSend
+    // returns undefined in inherit mode, so --model is never passed).
+    const mappings = useSettingsStore.getState().modelMappings;
+    if (mappings) {
+      const tier = TIER_MAP[selectedModel];
+      if (tier && mappings[tier]) return { ok: true, model: mappings[tier] };
+    }
+    // Fallback: before mappings load, show the selected model as-is
+    return { ok: true, model: selectedModel };
   }
 
   // 1. Check direct model ID mapping first (e.g. 'claude-opus-4-6-1m' → 'glm-5-1m')
@@ -96,6 +103,26 @@ export function resolveModelForProvider(selectedModel: string): string {
 export function resolveModelForSend(selectedModel: string): string | undefined {
   if (!useProviderStore.getState().getActive()) return undefined;
   return resolveModelForProvider(selectedModel);
+}
+
+/**
+ * Map a raw model ID (from CLI stream, sessionMeta, or selectedModel) to a
+ * human-readable display name. In inherit mode, resolves through settings.json
+ * model_name mappings (e.g. claude-sonnet-4-6 → deepseek-v4-pro).
+ * Falls back to displayProviderModelName when no mapping is available.
+ */
+export function resolveModelDisplay(rawModel: string | undefined | null): string {
+  if (!rawModel) return '';
+  if (useProviderStore.getState().getActive()) {
+    return displayProviderModelName(rawModel);
+  }
+  const mappings = useSettingsStore.getState().modelMappings;
+  if (mappings) {
+    const cleaned = rawModel.replace(/\s*\[1m\]\s*$/i, '').trim();
+    const tier = TIER_MAP[cleaned];
+    if (tier && mappings[tier]) return mappings[tier];
+  }
+  return displayProviderModelName(rawModel);
 }
 
 export function supportsDeepSeekThinking(model: string): boolean {

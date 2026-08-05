@@ -192,39 +192,6 @@
 | 新对话目录 | 新建对话时容易回到重新选文件夹流程 | 记住上次项目目录，新任务直接进入默认文件夹，并可在输入框下方快速切换 |
 | 发布包 | 需要自行构建或使用原项目发布 | Release 提供 Windows x64 exe / zip 和 SHA256 校验文件 |
 
-## 本 Fork 关键修复（详细）
-
-以下修复涉及 TOKENICODE 源码的深度改动，上游目前尚未包含。上方"本地定制"为摘要，此处展开说明。
-
-### 会话互通（CLI ↔ GUI）
-
-原版只显示 GUI 自身创建的会话，CLI 终端创建的会话被 `tracked` 过滤掉。本 Fork 移除了该过滤，两端会话完全互通。同时过滤自动标题生成等后台任务产生的幽灵会话（只有请求没有回复的空文件）。
-
-### 继承模式消息发送修复
-
-未在 GUI 配置 Provider 时（依赖 `~/.claude/settings.json` 走 CC Switch 等代理），原版无条件传 `--model` 覆盖 settings.json 路由，导致 DeepSeek/CC Switch 场景下发消息无回复。本 Fork 在 inherit 模式下不传 `--model`，完全交给 CLI 的 settings.json 决定路由。
-
-### 文件树 CPU 100%（Windows home 目录）
-
-原版递归树 + 整树重读模型在 Windows home 目录（含 AppData 等高频变更目录）下触发 CPU 持续 100%。本 Fork 重构为扁平目录缓存架构：按需单层加载，目录级精确刷新，搜索走独立磁盘扫描，噪音目录（AppData、.cache）在文件监听中忽略。
-
-### stdout 看门狗（"思考中"卡住数小时）
-
-Windows 下 CLI 子进程 stdout 使用块缓冲（4KB），短文本响应不足缓冲区大小不会自动 flush，用户看到"思考中"持续数小时但实际 CLI 早已完成回复并写入 JSONL。本 Fork 增加 10 秒 stdout 看门狗：超时后扫描 JSONL 文件，发现已完成但前端未收到的消息时自动合成并推送。
-
-### AskUserQuestion
-
-- **answers 键**：原版用索引作为 answers 键，Claude 判定 "The user did not answer the questions."。修复为使用问题文本作为键。
-- **preview 渲染**：选项的 `preview` 字段（如 ASCII art）原版完全不渲染。新增悬停跟随 + 点击锁定两种交互，超长内容可滚动不裁切。
-
-### MCP HTTP/SSE 类型
-
-原版只支持 `stdio` 类型 MCP（强制要求 `command` 字段），HTTP/SSE 类型被完全过滤。本 Fork 增加类型选择器，支持 `url` 和 `headers` 配置。
-
-### 模型显示统一入口
-
-原版侧栏、聊天顶栏、模型选择器等显示点各有独立的 `getModelDisplayName` 函数，继承模式下显示名不一致。本 Fork 统一为 `resolveModelDisplay()` 单一入口，从 settings.json 读取全部 tier 映射。
-
 ## 下载
 
 请到 GitHub Releases 下载对应系统的安装包：

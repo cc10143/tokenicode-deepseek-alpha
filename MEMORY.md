@@ -87,3 +87,17 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **实现**：`lockedIdx: number | null` 状态，`activePreviewIdx = lockedIdx ?? hoverIdx`；handleToggle 里 `setLockedIdx(prev => prev === optIdx ? null : optIdx)`。
 
 **验证**：tsc 通过；构建覆盖便携版，用户复测确认。commit `64c7290` 已 push fork。
+
+## 2026-08-05 模型显示路由统一修复
+
+**问题**：方案 7（`94cf86c`）的 `inheritedModel` 是"settings.json 当前 tier 的单条模型"，各显示点把它当作固定值，导致无论 GUI 选 Sonnet/Opus/Haiku 都显示同一个模型名。Sidebar 优先显示 `sessionMeta.model`（CLI 报告的原始 Claude 名如 `claude-sonnet-4-6[1M]`），继承模式下覆盖了映射后的显示名。显示路径散落 3 个重复 helper（`getModelDisplayName` × 2 + `modelLabel`）。
+
+**修复**（commit `a4ba83a`，11 个文件）：
+- `get_cli_model_config` 改用 `_MODEL_NAME`（上游名 `deepseek-v4-pro`）替代 `_MODEL`（Claude 内部名）
+- 新增 Rust 命令 `get_cli_model_mappings` — 读全部 3 个 tier→上游名映射
+- `resolveModelOrError` inherit 分支改为 `modelMappings[tier]`（按 GUI 选中的 tier 对应），非固定 `inheritedModel`
+- 新增 `resolveModelDisplay(rawModel)` — 统一显示入口，继承模式下通过 `modelMappings` 把原始模型名映射到上游名
+- 5 个组件中的 3 个重复 helper → 1 个统一入口
+- Rust 日志用 `log::info!`，前端用 `bridge.frontendLog()` — 排查加载失败时可见
+
+**附加发现——ConPTY 0-line bug**：ConPTY 代码（从未提交）在构建中被意外引入，`conpty::Process::output()` reader 读不到数据导致 stdout 0 lines，但 CLI 实际正常工作（JSONL 可见）。回退到 pipe 方式。ConPTY 方案暂挂起。

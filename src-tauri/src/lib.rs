@@ -1881,16 +1881,75 @@ async fn start_claude_session(
         let mut emit_fail_start: Option<std::time::Instant> = None;
         let mut post_stdin_lines: u32 = 0;
         let spawn_time = std::time::Instant::now();
+        // JSONL watchdog: detect when CLI stdout buffer stalls after thinking
+        let mut cli_session_id: Option<String> = None;
+        let mut jsonl_path_cache: Option<std::path::PathBuf> = None;
+        let mut last_text_activity = spawn_time;
+        let mut jsonl_emitted_assistant_count: usize = 0;
         loop {
-            let line = match lines.next_line().await {
-                Ok(Some(line)) => line,
-                Ok(None) => {
+            let line = match tokio::time::timeout(std::time::Duration::from_secs(10), lines.next_line()).await {
+                Ok(Ok(Some(line))) => line,
+                Ok(Ok(None)) => {
                     log::info!("[TOKENICODE:stdout] EOF after {} lines (elapsed={}ms), session={}", line_count, spawn_time.elapsed().as_millis(), sid_clone);
                     break;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     log::error!("[TOKENICODE:CRITICAL] stdout read error after {} lines (session={}): {}", line_count, sid_clone, e);
                     break;
+                }
+                Err(_) => {
+                    // JSONL watchdog: stdout silent for 10s, check if CLI wrote response to JSONL
+                    if let Some(ref cid) = cli_session_id {
+                        if last_text_activity.elapsed() > std::time::Duration::from_secs(10) {
+                            if jsonl_path_cache.is_none() {
+                                if let Some(home) = dirs::home_dir() {
+                                    let projects_dir = home.join(".claude").join("projects");
+                                    if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+                                        for entry in entries.flatten() {
+                                            if !entry.path().is_dir() { continue; }
+                                            let candidate = entry.path().join(format!("{}.jsonl", cid));
+                                            if candidate.exists() {
+                                                jsonl_path_cache = Some(candidate);
+                                                log::info!("[TOKENICODE:watchdog] found JSONL at {:?}", jsonl_path_cache);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(ref jsonl_path) = jsonl_path_cache {
+                                if let Ok(content) = std::fs::read_to_string(jsonl_path) {
+                                    let mut assistant_idx: usize = 0;
+                                    for jsonl_line in content.lines() {
+                                        let j = match serde_json::from_str::<Value>(jsonl_line) {
+                                            Ok(j) => j, Err(_) => continue,
+                                        };
+                                        if j.get("type").and_then(|v| v.as_str()) != Some("assistant") { continue; }
+                                        assistant_idx += 1;
+                                        if assistant_idx <= jsonl_emitted_assistant_count { continue; }
+                                        let stop_reason = j.get("message").and_then(|m| m.get("stop_reason"))
+                                            .and_then(|v| v.as_str()).unwrap_or("");
+                                        if stop_reason != "end_turn" { continue; }
+                                        log::info!("[TOKENICODE:watchdog] synthesizing assistant #{} from JSONL (session={})", assistant_idx, cid);
+                                        let synth = serde_json::json!({
+                                            "type": "assistant", "message": j["message"],
+                                            "uuid": j["uuid"], "session_id": cid,
+                                        });
+                                        let payload = synth.clone();
+                                        if let Err(e1) = app_clone.emit_to("main", &stream_event, payload.clone()) {
+                                            if let Err(_e2) = app_clone.emit(&stream_event, payload) {
+                                                log::info!("[TOKENICODE:watchdog] emit failed: {}", e1);
+                                            }
+                                        }
+                                        jsonl_emitted_assistant_count = assistant_idx;
+                                        last_text_activity = std::time::Instant::now();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    continue;
                 }
             };
             line_count += 1;
@@ -1930,6 +1989,34 @@ async fn start_claude_session(
                 Ok(v) => v,
                 Err(_) => continue, // skip non-JSON lines
             };
+
+            // Extract CLI session_id from init message (needed for JSONL watchdog)
+            if cli_session_id.is_none()
+                && json.get("type").and_then(|v| v.as_str()) == Some("system")
+                && json.get("subtype").and_then(|v| v.as_str()) == Some("init")
+            {
+                if let Some(cid) = json.get("session_id").and_then(|v| v.as_str()) {
+                    cli_session_id = Some(cid.to_string());
+                    log::info!("[TOKENICODE:watchdog] captured CLI session_id={}", cid);
+                }
+            }
+
+            // Update watchdog activity timestamp for non-thinking content
+            match json.get("type").and_then(|v| v.as_str()) {
+                Some("assistant") | Some("result") => {
+                    last_text_activity = std::time::Instant::now();
+                }
+                Some("stream_event") => {
+                    let evt = &json["event"];
+                    let is_text = evt["delta"]["type"].as_str() == Some("text_delta")
+                        || (evt["type"] == "content_block_start"
+                            && evt["content_block"]["type"] == "text");
+                    if is_text {
+                        last_text_activity = std::time::Instant::now();
+                    }
+                }
+                _ => {}
+            }
 
             // Intercept control_request messages for SDK control protocol routing.
             // All modes use --permission-prompt-tool stdio. In bypass mode, we

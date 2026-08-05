@@ -205,6 +205,8 @@ src/
 
 10. **Session mode mapping** — Frontend modes (`code`/`ask`/`plan`/`bypass`) map to CLI permission modes (`acceptEdits`/`default`/`plan`/`bypassPermissions`) via `mapSessionModeToPermissionMode()`.
 
+11. **Model display routing** — `resolveModelForProvider` maps GUI model IDs to display names (provider mode: tier→provider mapping; inherit mode: `modelMappings[tier]` from settings.json). `resolveModelForSend` returns `undefined` in inherit mode so `--model` isn't passed to CLI. `resolveModelDisplay(rawModel)` is the single entry point for human-readable model names everywhere — maps CLI-reported names like `claude-sonnet-4-6[1M]` through settings.json if in inherit mode. `modelMappings` (transient, loaded once from `get_cli_model_mappings`) holds all tier→upstream-model_name entries. `inheritedModel` (transient, from `get_cli_model_config`) holds the current tier's upstream name from settings.json.
+
 ## Common Debugging Locations
 
 | Symptom | Where to look |

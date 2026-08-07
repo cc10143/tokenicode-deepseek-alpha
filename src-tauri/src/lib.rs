@@ -1821,6 +1821,7 @@ async fn start_claude_session(
     };
 
     let pid = child.id().unwrap_or(0);
+    let cwd_for_session = params.cwd.clone();
     log::info!(
         "[TOKENICODE] CLI spawned: pid={}, bin={}, permission_mode={}",
         pid, claude_bin, permission_mode
@@ -1869,6 +1870,8 @@ async fn start_claude_session(
     let sid_clone = sid.clone();
     let stdin_clone = stdin_mgr.inner().clone();
     let is_bypass = permission_mode == "bypassPermissions";
+    let session_pid = pid;
+    let session_cwd = cwd_for_session.clone();
     tokio::spawn(async move {
         let stream_event = format!("claude:stream:{}", sid_clone);
         // Use a large buffer (1MB) to efficiently read large NDJSON lines from Claude CLI.
@@ -1886,6 +1889,7 @@ async fn start_claude_session(
         let mut jsonl_path_cache: Option<std::path::PathBuf> = None;
         let mut last_text_activity = spawn_time;
         let mut jsonl_emitted_assistant_count: usize = 0;
+        let mut jsonl_metadata_fixed: bool = false;
         loop {
             let line = match tokio::time::timeout(std::time::Duration::from_secs(10), lines.next_line()).await {
                 Ok(Ok(Some(line))) => line,
@@ -1998,6 +2002,53 @@ async fn start_claude_session(
                 if let Some(cid) = json.get("session_id").and_then(|v| v.as_str()) {
                     cli_session_id = Some(cid.to_string());
                     log::info!("[TOKENICODE:watchdog] captured CLI session_id={}", cid);
+
+                    // Write sessions/<pid>.json metadata so CLI /resume picker
+                    // discovers this session. CLI normally writes this itself,
+                    // but TOKENICODE may kill the CLI process before it does.
+                    if let Some(home) = dirs::home_dir() {
+                        let sessions_dir = home.join(".claude").join("sessions");
+                        let _ = std::fs::create_dir_all(&sessions_dir);
+                        let session_file = sessions_dir.join(format!("{}.json", session_pid));
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default();
+                        let metadata = serde_json::json!({
+                            "pid": session_pid,
+                            "sessionId": cid,
+                            "cwd": &session_cwd,
+                            "startedAt": now.as_millis() as u64,
+                            "procStart": now.as_nanos().to_string(),
+                            "version": "2.1.195",
+                            "peerProtocol": 1,
+                            "kind": "interactive",
+                            "entrypoint": "cli",
+                            "status": "busy",
+                        });
+                        match std::fs::write(&session_file, serde_json::to_string(&metadata).unwrap_or_default()) {
+                            Ok(()) => log::info!(
+                                "[TOKENICODE] wrote sessions metadata: {}",
+                                session_file.display()
+                            ),
+                            Err(e) => log::warn!(
+                                "[TOKENICODE] failed to write sessions metadata: {}",
+                                e
+                            ),
+                        }
+                    }
+                }
+            }
+
+            // Fix JSONL metadata when CLI completes a turn (B方案).
+            // "result" message is CLI's definitive "turn complete" signal —
+            // all JSONL writes finished, CLI idle. TOKENICODE already uses
+            // this same signal to unlock the send button.
+            if !jsonl_metadata_fixed
+                && json.get("type").and_then(|v| v.as_str()) == Some("result")
+            {
+                if let Some(ref cid) = cli_session_id {
+                    fix_session_jsonl_metadata(cid);
+                    jsonl_metadata_fixed = true;
                 }
             }
 
@@ -2221,6 +2272,11 @@ async fn start_claude_session(
                 emit_fail_start = None;
             }
         }
+        // Fix JSONL after session ends: CLI marks stream-json sessions
+        // with promptSource:"sdk" which hides them from /resume.
+        if let Some(ref cid) = cli_session_id {
+            fix_session_jsonl_metadata(cid);
+        }
         // Emit process_exit on the stream channel (primary detection)
         log::info!("[TOKENICODE:stdout] process_exit emitting for session={}, lines_processed={}", sid_clone, line_count);
         let _ = emit_to_frontend(
@@ -2291,13 +2347,18 @@ async fn send_stdin(
     message: String,
 ) -> Result<(), String> {
     log::info!("[TOKENICODE:stdin] send_stdin command: session={}, msg_len={}, preview={}", session_id, message.len(), &message[..message.len().min(80)]);
-    // Wrap user text in stream-json NDJSON format
+    // Wrap user text in stream-json NDJSON format.
+    // Include promptSource: "typed" and entrypoint: "cli" so the CLI marks
+    // this as human terminal input rather than SDK input. Without these,
+    // CLI /resume filters out sessions created via stream-json mode.
     let json_msg = serde_json::json!({
         "type": "user",
         "message": {
             "role": "user",
             "content": message
-        }
+        },
+        "promptSource": "typed",
+        "entrypoint": "cli"
     });
     let result = stdin_mgr.send(&session_id, &json_msg.to_string()).await;
     if result.is_ok() {
@@ -3131,6 +3192,135 @@ fn search_session_file(path: &std::path::Path, query_lower: &str) -> Option<serd
 
 /// Extract preview (first user message) and cwd from a session .jsonl file.
 /// Returns (preview, cwd) — cwd may be empty if not found.
+/// Fix a session's JSONL: change promptSource:"sdk" → "typed" and
+/// entrypoint:"sdk-cli" → "cli" in the first user message, so the session
+/// appears in CLI /resume picker. Also writes TOKENICODE's custom session
+/// title (from tokenicode_session_names.json) as a custom-title record so
+/// /resume and TOKENICODE show the same title. Does nothing if already fixed.
+fn fix_session_jsonl_metadata(cid: &str) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let projects_dir = home.join(".claude").join("projects");
+    let entries = match std::fs::read_dir(&projects_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() { continue; }
+        let candidate = entry.path().join(format!("{}.jsonl", cid));
+        if !candidate.exists() { continue; }
+
+        match std::fs::read_to_string(&candidate) {
+            Ok(content) => {
+                let mut fixed = content.clone();
+                let mut made_change = false;
+
+                // Fix first user message: promptSource + entrypoint
+                for line in content.lines() {
+                    if !line.contains("\"type\":\"user\"") && !line.contains("\"type\": \"user\"") {
+                        continue;
+                    }
+                    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(line) {
+                        let needs_fix_ps = val.get("promptSource").and_then(|v| v.as_str()) == Some("sdk");
+                        let needs_fix_ep = val.get("entrypoint").and_then(|v| v.as_str()) == Some("sdk-cli");
+                        if needs_fix_ps || needs_fix_ep {
+                            if needs_fix_ps {
+                                val["promptSource"] = serde_json::Value::String("typed".into());
+                            }
+                            if needs_fix_ep {
+                                val["entrypoint"] = serde_json::Value::String("cli".into());
+                            }
+                            let new_line = serde_json::to_string(&val).unwrap_or_else(|_| line.to_string());
+                            fixed = fixed.replacen(line, &new_line, 1);
+                            made_change = true;
+                        }
+                        break; // only fix the first user message
+                    }
+                }
+
+                // Fix entrypoint globally: assistant/system messages also carry
+                // "sdk-cli" which may cause the picker to filter the session.
+                if fixed.contains("\"entrypoint\":\"sdk-cli\"") {
+                    fixed = fixed.replace("\"entrypoint\":\"sdk-cli\"", "\"entrypoint\":\"cli\"");
+                    made_change = true;
+                }
+
+                if made_change {
+                    if let Err(e) = std::fs::write(&candidate, &fixed) {
+                        log::warn!("[TOKENICODE:jsonl-fix] write failed for {}: {}", cid, e);
+                    } else {
+                        log::info!("[TOKENICODE:jsonl-fix] fixed {}", cid);
+                    }
+                }
+            }
+            Err(e) => log::warn!("[TOKENICODE:jsonl-fix] read failed for {}: {}", cid, e),
+        }
+        break;
+    }
+}
+
+/// Startup scan (A方案): fix all existing JSONL files that have SDK markers.
+/// Runs once at app startup, async in background.
+#[tauri::command]
+fn fix_all_sessions_jsonl() {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let projects_dir = home.join(".claude").join("projects");
+    let entries = match std::fs::read_dir(&projects_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut fixed_count = 0u32;
+    let mut total = 0u32;
+
+    // Only fix sessions TOKENICODE created, not arbitrary claude -p / SDK sessions.
+    // Whitelist from tokenicode_session_names.json (TOKENICODE's own session registry).
+    let tok_ids: std::collections::HashSet<String> = {
+        let names_file = home.join(".claude").join("tokenicode_session_names.json");
+        std::fs::read_to_string(&names_file)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.as_object().cloned())
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() { continue; }
+        let files = match std::fs::read_dir(entry.path()) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().map_or(false, |e| e == "jsonl") {
+                total += 1;
+                if let Some(name) = path.file_stem() {
+                    let cid = name.to_string_lossy().to_string();
+                    if !tok_ids.contains(&cid) { continue; }
+                    // Quick check: scan up to 64KB for the SDK marker
+                    if let Ok(head) = std::fs::read_to_string(&path) {
+                        let head = &head[..head.len().min(65536)];
+                        if head.contains("\"promptSource\":\"sdk\"") {
+                            fix_session_jsonl_metadata(&cid);
+                            fixed_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    log::info!(
+        "[TOKENICODE:jsonl-fix] startup scan done: fixed {}/{} sessions",
+        fixed_count, total
+    );
+}
+
 fn extract_session_info(path: &std::path::Path) -> (String, String, bool) {
     use std::io::BufRead;
     let file = match std::fs::File::open(path) {
@@ -8593,6 +8783,7 @@ pub fn run() {
             send_raw_stdin,
             frontend_log,
             kill_session,
+            fix_all_sessions_jsonl,
             list_active_processes,
             track_session,
             untrack_session,

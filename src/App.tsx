@@ -199,6 +199,8 @@ function App() {
   useEffect(() => {
     if (reconnectRanRef.current) return;
     reconnectRanRef.current = true;
+    // A方案: fix JSONL metadata on startup so sessions appear in CLI /resume
+    bridge.fixAllSessionsJsonl().catch(() => {});
     bridge.listActiveProcesses().then((activeIds) => {
       if (!activeIds.length) return;
       const sessionState = useSessionStore.getState();

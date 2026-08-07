@@ -348,6 +348,8 @@ export const bridge = {
 
   listSessions: () =>
     invoke<SessionListItem[]>('list_sessions'),
+  // A方案: startup scan to fix SDK-marked JSONL files
+  fixAllSessionsJsonl: () => invoke<void>('fix_all_sessions_jsonl'),
 
   getProfileStats: () =>
     invoke<ProfileStats>('get_profile_stats'),

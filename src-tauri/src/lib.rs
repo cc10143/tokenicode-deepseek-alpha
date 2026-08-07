@@ -871,6 +871,14 @@ fn strip_one_m_marker(model: &str) -> String {
     }
 }
 
+/// Truncate a string to at most `max` characters, safe for multi-byte UTF-8.
+/// Byte-index slicing (`&s[..n]`) panics when byte `n` lands mid-character
+/// (common for Chinese text), which silently kills async tasks and hangs the
+/// caller. Char-based truncation never lands mid-character.
+fn safe_preview(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
 /// Read the effective model from ~/.claude/settings.json for inherit mode display.
 /// Resolves the `model` tier (haiku/sonnet/opus) through ANTHROPIC_DEFAULT_{TIER}_MODEL_NAME
 /// so the GUI shows the upstream model name (e.g. deepseek-v4-flash) that CC-Switch uses.
@@ -1960,11 +1968,7 @@ async fn start_claude_session(
             // Log first 10 lines with timing to diagnose startup delay
             if line_count <= 10 {
                 let elapsed = spawn_time.elapsed().as_millis();
-                let preview = if line.len() > 150 {
-                    &line[..150]
-                } else {
-                    &line
-                };
+                let preview = safe_preview(&line, 150);
                 log::info!(
                     "[TOKENICODE:stdout] #{} @{}ms type={} preview={}",
                     line_count,
@@ -1982,7 +1986,7 @@ async fn start_claude_session(
             }
             if post_stdin_lines > 0 {
                 post_stdin_lines -= 1;
-                let preview = if line.len() > 150 { &line[..150] } else { &line };
+                let preview = safe_preview(&line, 150);
                 log::info!("[TOKENICODE:stdout:post-stdin] #{} @{}ms preview={}", line_count, spawn_time.elapsed().as_millis(), preview);
             }
             if line_count % 20 == 0 {
@@ -2197,7 +2201,7 @@ async fn start_claude_session(
                 } else {
                     log::info!(
                         "[TOKENICODE] control_request missing 'request' field: {}",
-                        &line[..line.len().min(200)]
+                        safe_preview(&line, 200)
                     );
                     // Auto-allow to avoid blocking CLI
                     let auto_resp = serde_json::json!({
@@ -2306,7 +2310,7 @@ async fn start_claude_session(
             if let Some(line) = line_opt {
                 stderr_count += 1;
                 if stderr_count <= 5 {
-                    let preview = if line.len() > 200 { &line[..200] } else { &line };
+                    let preview = safe_preview(&line, 200);
                     log::info!("[TOKENICODE:stderr] #{} session={} preview={}", stderr_count, sid_clone2, preview);
                 }
                 let _ = emit_to_frontend(
@@ -2346,7 +2350,12 @@ async fn send_stdin(
     session_id: String,
     message: String,
 ) -> Result<(), String> {
-    log::info!("[TOKENICODE:stdin] send_stdin command: session={}, msg_len={}, preview={}", session_id, message.len(), &message[..message.len().min(80)]);
+    // Safe preview: take chars (not bytes) to avoid panicking on a multi-byte
+    // UTF-8 boundary. The old `&message[..len.min(80)]` panicked for any message
+    // over 80 bytes whose byte 80 landed mid-character (common for Chinese text),
+    // which silently killed the async command and hung follow-up messages.
+    let preview = safe_preview(&message, 80);
+    log::info!("[TOKENICODE:stdin] send_stdin command: session={}, msg_len={}, preview={}", session_id, message.len(), preview);
     // Wrap user text in stream-json NDJSON format.
     // Include promptSource: "typed" and entrypoint: "cli" so the CLI marks
     // this as human terminal input rather than SDK input. Without these,
@@ -3305,7 +3314,7 @@ fn fix_all_sessions_jsonl() {
                     if !tok_ids.contains(&cid) { continue; }
                     // Quick check: scan up to 64KB for the SDK marker
                     if let Ok(head) = std::fs::read_to_string(&path) {
-                        let head = &head[..head.len().min(65536)];
+                        let head: String = head.chars().take(65536).collect();
                         if head.contains("\"promptSource\":\"sdk\"") {
                             fix_session_jsonl_metadata(&cid);
                             fixed_count += 1;

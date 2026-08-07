@@ -26,6 +26,7 @@
 - **AskUserQuestion 选项 preview 渲染与锁定**：聚焦/hover 选项在卡片下方显示预览内容（保留换行与空格、超长 URL 自动断行、超长内容可滚动查看）；点击选项将预览锁定到该选项（标题显示锁图标与来源选项名，再点一次解锁），滚动查看长内容时不再被鼠标经过的选项劫持。
 - **MCP HTTP/SSE 类型支持**：MCP 设置页可配置远程服务器（`url` + `headers`），不再只支持 stdio 命令行类型。
 - **Rust 诊断日志系统**：fern + log crate 替代 `eprintln!`，所有模块统一走文件日志，方便排查问题。
+- **CLI `/resume` 会话互通**：TOKENICODE 创建的会话现在也会出现在终端 `claude --resume` 交互式会话选择器中。通过在回合完成时自动修复 JSONL 中的 `promptSource` 和 `entrypoint` 字段，使 SDK/stream-json 模式创建的会话与终端交互模式创建的会话在 picker 中完全互通。三层保障：回合完成即时修复、进程退出兜底、启动时扫描修复历史会话。
 
 ### v1.0.6
 

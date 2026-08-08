@@ -2,6 +2,11 @@
 
 ## 更新记录
 
+### v1.0.8
+
+- 同步 upstream v1.0.8：历史会话上下文恢复——重新打开历史会话时恢复会话 token 快照（context snapshot 从 JSONL 的 assistant 记录按 message id 去重计算，上下文统计不再因重新查看而归零）；日志脱敏采纳 upstream 的"不记录内容"原则（启动 stdout 只记 type/subtype/bytes，不再打印 prompt、回复、thinking 内容），用本项目 `log::info!`（fern）替代 upstream 的 `eprintln!`。
+- 保留本 fork 的 ghost 会话过滤、sendStdin fallback、AskUserQuestion preview 锁定等本地修复，不与 upstream 回退。
+
 ### v1.0.7
 
 - 修复回退后旧分支与新分支同时出现在历史列表、JSONL 重放记录重复的问题；回退提示不再写进对话历史，旧记录仍保留在本机用于恢复。
@@ -12,7 +17,7 @@
 - Windows 上 Provider 与 Skills 翻译 API Key 的加密主密钥改由 DPAPI 绑定当前用户保护，旧 Provider 密钥和旧的本地存储翻译配置会自动迁移；运行日志不再输出参数、PATH、环境变量值和带凭据的代理地址。
 - 保留 v1.0.6 的头像上传与稳定上下文快照修复；上下文显示继续计入缓存输入 token，不会因重新查看而归零。
 
-### 本地定制（本 fork 专有，基线 v1.0.7）
+### 本地定制（本 fork 专有，基线 v1.0.8）
 
 以下改动为本仓库 fork 相对 upstream 的定制，同步 upstream 时不会被覆盖：
 
@@ -198,8 +203,8 @@
 
 请到 GitHub Releases 下载对应系统的安装包：
 
-- Windows x64 便携版：`tokenicode-deepseek-alpha-v1.0.7-windows-x64.exe`
-- Windows x64 安装版：`tokenicode-deepseek-alpha-v1.0.7-windows-x64-setup.exe`
+- Windows x64 便携版：`tokenicode-deepseek-alpha-v1.0.8-windows-x64.exe`
+- Windows x64 安装版：`tokenicode-deepseek-alpha-v1.0.8-windows-x64-setup.exe`
 
 下载后双击运行即可。首次运行时请按需要配置 CC Switch / DeepSeek API。
 

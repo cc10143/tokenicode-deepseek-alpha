@@ -153,3 +153,22 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：vitest 全量 21 通过、`tsc --noEmit` 干净、`cargo build --release --frozen` 通过。**commit 待提交**。
 
 **遗留**：`inheritedModel` 仍只加载不消费（legacy，未删）。
+
+## 2026-08-08 Upstream v1.0.8 同步（context snapshot 恢复 + 日志脱敏）
+
+从 upstream 检测到 v1.0.8（commit `a51edd7`，父提交 `9c3bb65` = 我们的 v1.0.7 tag）。按用户决策部分合入：
+
+**合入**：
+- **#3+#7+#8+#9 context snapshot 恢复**：`get_session_tokens` 重写为 `compute_session_tokens`（读 assistant JSONL 记录，按 message id 去重 totals；context snapshot = 最后一条 assistant 的 `input + cache_read + cache_creation`）。ConversationList 打开会话时恢复 `sessionMeta`；useStreamProcessor 删除 result 段 2 处 `contextSnapshot()` 调用（保留 message_start 段）
+- **#1 日志脱敏**：采纳 upstream"不记内容"原则，但用我们的 `log::info!`（fern）替代 upstream 的 `eprintln!`。启动 stdout 前 10 行 + post-stdin 段改为只记 `type/subtype/bytes`，不再打印 line content（prompts/replies/thinking/tool args）
+
+**未合入（fork 取舍）**：
+- **#5 thinking 默认展开**：用户明确不合并
+- **ghost 会话过滤（冲突 A）**：upstream 把它当 regression 回退，我们保留自己的三元组过滤
+- **sendStdin fallback（冲突 B）**：保留我们的实现
+
+**版本号**：1.0.7 → 1.0.8（package.json / Cargo.toml / Cargo.lock / tauri.conf.json + changelog.ts + CHANGELOG.md + README）
+
+**验证**：tsc exit 0、vitest 21 通过、`cargo test test_session_tokens` 通过（新增 `test_session_tokens_use_latest_context_and_deduplicate_blocks`）、`pnpm tauri build --no-bundle` exit 0（tokenicode.exe 生成）。
+
+**注意**：v1.0.8 是手动合入（直接编辑），不是 cherry-pick，因为改动与我们 fork 有重叠（compute 逻辑在本地已存在，日志段重叠）。下次同步起点仍是 upstream `9c3bb65` 之后。

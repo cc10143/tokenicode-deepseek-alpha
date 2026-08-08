@@ -5,6 +5,11 @@ forked from mistydew/tokenicode-deepseek-alpha。
 
 创建：2026-08-04
 
+## 工作规范（2026-08-08）
+
+- **Git commit 必须带 scope**：格式 `<type>(<scope>): <desc>`（如 `fix(stdin): ...`）。禁止无 scope 或自定义前缀（如 `@ perf:`）。scope 用本项目模块名（stdin/session/stream/model-display/file-tree/mcp/settings/ui/docs 等）。详见 CLAUDE.md「Git Commit Convention」。这是用户明确要求强制的。
+- **已知待办已迁移到 GitHub Issues**：`cc10143/tokenicode-deepseek-alpha` issues #3-#6。MEMORY 不再重复维护待办清单。
+
 ## 2026-08-04 通信可靠性修复（lib.rs）
 
 针对用户报告的"通信中断需按停止重发"和"AskUserQuestion 回答了收不到"两个 bug，修了两处 `src-tauri/src/lib.rs` stdout reader 循环：
@@ -101,3 +106,22 @@ forked from mistydew/tokenicode-deepseek-alpha。
 - Rust 日志用 `log::info!`，前端用 `bridge.frontendLog()` — 排查加载失败时可见
 
 **附加发现——ConPTY 0-line bug**：ConPTY 代码（从未提交）在构建中被意外引入，`conpty::Process::output()` reader 读不到数据导致 stdout 0 lines，但 CLI 实际正常工作（JSONL 可见）。回退到 pipe 方式。ConPTY 方案暂挂起。
+
+## 2026-08-08 UTF-8 字节切片 panic：长中文 follow-up 无回复根因
+
+**症状**：GUI 发长中文消息（>80 字节）时偶发"无回复"——消息发出后永久卡死；同一 app 会话里短消息正常。诊断链：日志显示 `send_stdin command` 从未出现，但 `probe_echo`（异步命令）正常、两条运行时 canary 健康、前端 heartbeat 正常 → 锁定是 `send_stdin` 命令自身 panic。
+
+**根因**：`send_stdin` 第一行日志 `&message[..message.len().min(80)]` 是**字节切片**。中文 UTF-8 每字 3 字节，byte 80 落在字符中间 → Rust panic `byte index 80 is not a char boundary`。异步命令的 panic 被 tokio 吞掉（JoinError），Tauri 不响应 → 前端 promise 永久 pending = "无回复"。panic 在日志写出之前，所以连 `send_stdin command` 都不打印。触发消息 386 字节、byte 80 = 0x8F（续字节），必中。
+
+**同类 5 处**（全部可能含中文）：
+- stdout 前 10 行预览 `&line[..150]`（CLI 中文回复必然命中）
+- post-stdin 预览 `&line[..150]`
+- control_request 日志 `&line[..min(200)]`
+- stderr 预览 `&line[..200]`
+- 启动会话扫描 `&head[..min(65536)]`（中文会话 JSONL >64KB 必崩）
+
+**修复**（commit `111c8a0`）：新增 `safe_preview(s, max)`（`s.chars().take(max).collect()`，按字符切永不落半字），替换全部 6 处。从根上消除整类 panic，非逐个打补丁。
+
+**诊断方法论教训**：间歇性 bug 用"分层探针"定位——前端心跳（JS 存活）、异步命令 echo（分发链路）、两条运行时 canary（运行时健康）、锁时序（锁死锁）、promise 创建日志（前端是否真的调用）。最后用"同步命令"探针把 panic 顶到主线程导致崩溃，才暴露真实 panic 点。关键转折：崩溃不是坏事，它把静默吞掉的 panic 显性化了。
+
+**判断"是否同类坑"**：修复前全盘 grep `&[a-zA-Z_]+[..` / `.len().min(N)]` 模式，逐个确认内容是否可能含多字节。安全豁免：checksum（ASCII hex）、盘符解析（ASCII）、`.find()` 匹配点（字符边界）、`is_char_boundary` 兜底处。

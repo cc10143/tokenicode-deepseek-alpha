@@ -44,6 +44,22 @@ cd src-tauri && cargo check && cargo clippy
 
 The Tauri dev command runs `npm run dev` as its `beforeDevCommand` (configured in `tauri.conf.json`).
 
+## Git Commit Convention（强制）
+
+**所有 commit 必须用 Conventional Commits 格式并带 scope：**
+
+```
+<type>(<scope>): <description>
+```
+
+- `type`：`fix` / `feat` / `docs` / `perf` / `refactor` / `test` / `build` / `ci`
+- `scope`：改动所在模块，取自本项目自然模块名——`stdin`、`session`、`stream`、`model-display`、`file-tree`、`mcp`、`settings`、`ui`、`docs` 等
+- 例子：`fix(stdin): UTF-8-safe log previews`、`feat(mcp): support HTTP servers`、`docs(memory): record model display routing fix`
+
+**禁止**无 scope 的 commit（如 `fix: xxx`）和自定义前缀（如 `@ perf:`）。scope 让 git-cliff 生成的 CHANGELOG 能按模块分组。
+
+> 这条规范是用户明确要求强制的（2026-08-08），每次 commit 都必须遵守。
+
 ## Tech Stack
 
 | Layer | Technologies |
@@ -207,12 +223,14 @@ src/
 
 11. **Model display routing** — `resolveModelForProvider` maps GUI model IDs to display names (provider mode: tier→provider mapping; inherit mode: `modelMappings[tier]` from settings.json). `resolveModelForSend` returns `undefined` in inherit mode so `--model` isn't passed to CLI. `resolveModelDisplay(rawModel)` is the single entry point for human-readable model names everywhere — maps CLI-reported names like `claude-sonnet-4-6[1M]` through settings.json if in inherit mode. `modelMappings` (transient, loaded once from `get_cli_model_mappings`) holds all tier→upstream-model_name entries. `inheritedModel` (transient, from `get_cli_model_config`) holds the current tier's upstream name from settings.json.
 
+12. **UTF-8 safe log previews** — Never byte-slice user/CLI content (`&s[..n]`). Multi-byte UTF-8 (Chinese = 3 bytes/char) makes byte `n` land mid-character → Rust panic. In an async command the panic is swallowed by tokio (JoinError), the Tauri command never responds, and the frontend hangs silently — looks like "no reply" with no log. Always use `safe_preview(s, max)` (char-based). Audit rule: grep `&[a-zA-Z_]+[..` / `.len().min(N)]`; whitelist only checksums, ASCII drive letters, `.find()` match offsets, and `is_char_boundary`-guarded slices.
+
 ## Common Debugging Locations
 
 | Symptom | Where to look |
 |---------|--------------|
 | Message not appearing | `useStreamProcessor.ts` (stream parsing), `chatStore.ts` (addMessage, updatePartialMessage) |
-| Message sent but no response | `InputBar.tsx` (handleSubmit), `tauri-bridge.ts` (startSession/sendStdin), `lib.rs` (start_claude_session) |
+| Message sent but no response | `InputBar.tsx` (handleSubmit), `tauri-bridge.ts` (startSession/sendStdin), `lib.rs` (start_claude_session). **If only long Chinese messages hang while short ones work → UTF-8 byte-slicing panic in `send_stdin` log preview** (fixed 2026-08-08 via `safe_preview`, commit `111c8a0`). Async command panics are swallowed by tokio → no log, no response. |
 | Permission dialog issues | `PermissionCard.tsx`, `protocol.rs`, `lib.rs` (respond_permission, send_control_request) |
 | Streaming stuck / partial | `useStreamProcessor.ts` (handleStreamMessage), `lib.rs` (stdout reading loop) |
 | Tab switching loses state | `chatStore.ts` (saveToCache/restoreFromCache), `agentStore.ts` (saveToCache/restoreFromCache) |

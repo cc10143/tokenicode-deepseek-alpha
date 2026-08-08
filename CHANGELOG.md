@@ -6,6 +6,27 @@ All notable changes to TOKENICODE will be documented in this file.
 
 ---
 
+## [1.0.8] - 2026-08-08
+
+> 本节为 fork 合入 upstream v1.0.8（`a51edd7`）的修复。冲突点按 fork 定制优先保留。
+
+### Fixed
+
+- **历史会话上下文快照恢复**（合入 upstream v1.0.8）— `get_session_tokens` 从读 `stream_event`（裸 input/output 累加）改为读 `assistant` 记录的完整 usage（含 `cache_read`/`cache_creation`），按 message id 去重，额外返回 `contextInputTokens`/`contextOutputTokens`（最近一次占用的上下文快照）。`ConversationList` 打开历史会话时用其恢复 billing totals + context snapshot，修复 v1.0.7 引入的"Ctx 归零"；`useStreamProcessor` result 段删除重复的 `contextSnapshot()` spread（message_start 段保留），修复重复计数。
+- **启动诊断日志脱敏**（合入 upstream v1.0.8）— 启动 stdout 前 10 行 + post-stdin 段不再记录行内容（prompt/reply/thinking/tool args），只记 `type/subtype/bytes`。保留本地 `log::info!`（fern）形式。stderr、control_request 异常分支、send_stdin 用户输入日志暂保留内容，属独立决策。
+
+### Changed
+
+- **版本号** 1.0.7 → 1.0.8（package.json / Cargo.toml / Cargo.lock / tauri.conf.json / changelog.ts / CHANGELOG.md）
+
+### 未采纳（fork 取舍，保留本地实现）
+
+- **幽灵会话过滤保留** — upstream v1.0.8 回退了 `!has_assistant` 过滤（v1.0.7 regression：API 失败后无 assistant 记录的 tracked 会话消失）。fork 保留该过滤（auto-title 幽灵文件），沿用现有三元组 `extract_session_info`。
+- **AskUserQuestion sendStdin 兜底 + preview 渲染锁定保留** — upstream 抽取 `buildAskUserQuestionAnswers` helper 并删除 sendStdin 兜底；fork 保留 inline answers 构建 + sendStdin 兜底 + 独有的 preview 渲染/悬停锁定。
+- **thinking 默认展开未采纳** — upstream 改 `<details open>`；fork 保留默认收起。
+
+---
+
 ## [1.0.7] - 2026-08-08
 
 > 本节为 fork（`cc10143/tokenicode-deepseek-alpha`）相对 upstream（`mistydew/tokenicode-deepseek-alpha`）的定制与修复。1.0.7 之前的历史见下方 0.x 版本段。

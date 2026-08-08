@@ -1992,19 +1992,19 @@ async fn start_claude_session(
                 }
             };
             line_count += 1;
-            // Log first 10 lines with timing to diagnose startup delay
+            // Log first 10 lines with timing to diagnose startup delay.
+            // Log metadata only — never persist line content (prompts, replies,
+            // thinking text, tool args) into application logs.
             if line_count <= 10 {
                 let elapsed = spawn_time.elapsed().as_millis();
-                let preview = safe_preview(&line, 150);
+                let json = serde_json::from_str::<Value>(&line).ok();
                 log::info!(
-                    "[TOKENICODE:stdout] #{} @{}ms type={} preview={}",
+                    "[TOKENICODE:stdout] #{} @{}ms type={} subtype={} bytes={}",
                     line_count,
                     elapsed,
-                    serde_json::from_str::<Value>(&line)
-                        .ok()
-                        .and_then(|v| v.get("type").and_then(|t| t.as_str().map(String::from)))
-                        .unwrap_or_else(|| "?".into()),
-                    preview
+                    json.as_ref().and_then(|v| v.get("type").and_then(|t| t.as_str())).unwrap_or("?"),
+                    json.as_ref().and_then(|v| v.get("subtype").and_then(|t| t.as_str())).unwrap_or("-"),
+                    line.len(),
                 );
             }
             if STDIN_JUST_SENT.load(Ordering::SeqCst) {
@@ -2013,8 +2013,15 @@ async fn start_claude_session(
             }
             if post_stdin_lines > 0 {
                 post_stdin_lines -= 1;
-                let preview = safe_preview(&line, 150);
-                log::info!("[TOKENICODE:stdout:post-stdin] #{} @{}ms preview={}", line_count, spawn_time.elapsed().as_millis(), preview);
+                let json = serde_json::from_str::<Value>(&line).ok();
+                log::info!(
+                    "[TOKENICODE:stdout:post-stdin] #{} @{}ms type={} subtype={} bytes={}",
+                    line_count,
+                    spawn_time.elapsed().as_millis(),
+                    json.as_ref().and_then(|v| v.get("type").and_then(|t| t.as_str())).unwrap_or("?"),
+                    json.as_ref().and_then(|v| v.get("subtype").and_then(|t| t.as_str())).unwrap_or("-"),
+                    line.len(),
+                );
             }
             if line_count % 20 == 0 {
                 log::info!("[TOKENICODE:stdout:heartbeat] line={} elapsed={}ms", line_count, spawn_time.elapsed().as_millis());
@@ -3618,12 +3625,9 @@ async fn load_session(path: String) -> Result<Vec<Value>, String> {
     Ok(messages)
 }
 
-/// Compute cumulative token totals from a Claude session JSONL file.
-/// Reads message_start.input_tokens and message_delta.output_tokens events.
+/// Compute token totals and latest context snapshot for a session JSONL file.
 #[tauri::command]
 async fn get_session_tokens(session_id: String) -> Result<Value, String> {
-    use std::io::BufRead;
-
     // Find the JSONL file: ~/.claude/projects/<any-project>/<session_id>.jsonl
     let home = dirs::home_dir().ok_or("Cannot find home dir")?;
     let projects_dir = home.join(".claude").join("projects");
@@ -3648,46 +3652,60 @@ async fn get_session_tokens(session_id: String) -> Result<Value, String> {
 
     let file = std::fs::File::open(&path)
         .map_err(|e| format!("Failed to open session JSONL: {}", e))?;
-    let reader = std::io::BufReader::new(file);
+    Ok(compute_session_tokens(std::io::BufReader::new(file)))
+}
 
+/// Compute billing totals and the latest occupied-context snapshot from a
+/// persisted Claude session JSONL file. Assistant records may be repeated once
+/// per content block, so totals are de-duplicated by message id.
+fn compute_session_tokens<R: std::io::BufRead>(reader: R) -> Value {
+    let mut seen_message_ids = std::collections::HashSet::new();
     let mut total_input_tokens: u64 = 0;
     let mut total_output_tokens: u64 = 0;
+    let mut context_input_tokens: u64 = 0;
+    let mut context_output_tokens: u64 = 0;
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
+    for line in reader.lines().map_while(Result::ok) {
+        let Ok(json) = serde_json::from_str::<Value>(&line) else {
+            continue;
         };
-        let json = match serde_json::from_str::<Value>(&line) {
-            Ok(j) => j,
-            Err(_) => continue,
-        };
-
-        // Only process stream_event types
-        if json["type"].as_str() != Some("stream_event") {
+        if json["type"].as_str() != Some("assistant") {
+            continue;
+        }
+        let message = &json["message"];
+        let usage = &message["usage"];
+        if !usage.is_object() {
             continue;
         }
 
-        let event = &json["event"];
-        match event["type"].as_str() {
-            Some("message_start") => {
-                if let Some(tokens) = event["message"]["usage"]["input_tokens"].as_u64() {
-                    total_input_tokens += tokens;
-                }
-            }
-            Some("message_delta") => {
-                if let Some(tokens) = event["usage"]["output_tokens"].as_u64() {
-                    total_output_tokens += tokens;
-                }
-            }
-            _ => {}
+        let input = usage["input_tokens"].as_u64().unwrap_or(0);
+        let output = usage["output_tokens"].as_u64().unwrap_or(0);
+        let cache_read = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
+        let direct_cache_creation = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+        let cache_creation = if direct_cache_creation > 0 {
+            direct_cache_creation
+        } else {
+            usage["cache_creation"]["ephemeral_1h_input_tokens"].as_u64().unwrap_or(0)
+                + usage["cache_creation"]["ephemeral_5m_input_tokens"].as_u64().unwrap_or(0)
+        };
+
+        // The latest assistant API call is the authoritative context snapshot.
+        context_input_tokens = input + cache_read + cache_creation;
+        context_output_tokens = output;
+
+        let message_id = message["id"].as_str().unwrap_or_default();
+        if !message_id.is_empty() && seen_message_ids.insert(message_id.to_string()) {
+            total_input_tokens += input;
+            total_output_tokens += output;
         }
     }
 
-    Ok(serde_json::json!({
+    serde_json::json!({
         "totalInputTokens": total_input_tokens,
         "totalOutputTokens": total_output_tokens,
-    }))
+        "contextInputTokens": context_input_tokens,
+        "contextOutputTokens": context_output_tokens,
+    })
 }
 
 #[tauri::command]
@@ -8908,7 +8926,21 @@ pub fn run() {
 
 #[cfg(test)]
 mod decode_tests {
-    use super::{decode_project_name, provider_messages_endpoint};
+    use super::{compute_session_tokens, decode_project_name, provider_messages_endpoint};
+
+    #[test]
+    fn test_session_tokens_use_latest_context_and_deduplicate_blocks() {
+        let jsonl = concat!(
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":900,\"output_tokens\":20}}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":900,\"output_tokens\":20}}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"m2\",\"usage\":{\"input_tokens\":50,\"cache_read_input_tokens\":1050,\"output_tokens\":10}}}\n",
+        );
+        let usage = compute_session_tokens(std::io::Cursor::new(jsonl));
+        assert_eq!(usage["totalInputTokens"], 150);
+        assert_eq!(usage["totalOutputTokens"], 30);
+        assert_eq!(usage["contextInputTokens"], 1100);
+        assert_eq!(usage["contextOutputTokens"], 10);
+    }
 
     #[cfg(target_os = "windows")]
     #[test]

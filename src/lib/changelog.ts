@@ -19,6 +19,29 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.8',
+    date: '2026-08-08',
+    highlights: {
+      zh: ['历史会话上下文恢复 + 日志脱敏'],
+      en: ['Session context restore + log redaction'],
+    },
+    categories: [
+      {
+        label: { zh: '修复', en: 'Fixed' },
+        items: {
+          zh: [
+            '重开历史会话恢复上下文快照与 token 统计（合入 upstream v1.0.8）',
+            '启动诊断日志不再记录对话内容（prompt/reply/thinking/tool args）',
+          ],
+          en: [
+            'Restore context snapshot and token totals when reopening a historical session (from upstream v1.0.8)',
+            'Startup diagnostics no longer log conversation content (prompts, replies, thinking, tool args)',
+          ],
+        },
+      },
+    ],
+  },
+  {
     version: '1.0.7',
     date: '2026-08-02',
     highlights: {

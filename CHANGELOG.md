@@ -6,6 +6,52 @@ All notable changes to TOKENICODE will be documented in this file.
 
 ---
 
+## [1.0.7] - 2026-08-08
+
+> 本节为 fork（`cc10143/tokenicode-deepseek-alpha`）相对 upstream（`mistydew/tokenicode-deepseek-alpha`）的定制与修复。1.0.7 之前的历史见下方 0.x 版本段。
+
+### Added
+
+- **文件树扁平缓存架构** — 将递归嵌套树（8 层预取）替换为扁平目录缓存：`dirContents: Map<path, 单层条目>`，展开目录时才按需加载，刷新从"整树重读"改为"目录级精确刷新"。根因是递归树 + 整树重读在 Windows home 目录（含 AppData）下触发 CPU 100%（issue #1/#20），根本原因是刷新成本与目录活跃度耦合而非与实际变更量耦合。噪音目录（AppData/.cache）不触发 watcher 事件但目录仍可浏览；文件搜索改为独立 Rust 磁盘扫描命令（`search_files`）。上游 PR #23。
+- **MCP HTTP/SSE 服务器支持** — 原实现只支持 `stdio` 类型 MCP（强制要求 `command` 字段），HTTP/SSE 类型被完全过滤。`McpServerForm` 新增类型选择器（Stdio 命令行 / HTTP 远程），支持 `url` + `headers` 配置，写回统一走 `buildMcpEntry()`。
+- **MCP 配置透传** — 启动 CLI 时传 `--mcp-config`，配合 `--strict-mcp-config` 精确控制 CLI 加载哪些 MCP server，跳过 `~/.claude.json` 的全局 MCP 冷启动开销（20-30s）。
+- **诊断日志系统** — 引入 `log` + `fern`（替代自研宏），日志写 `C:\Users\<user>\.tokenicode\tokenicode.log`，同时输出 stderr。
+- **最近活动视图 + 文件夹终端操作**（cherry-pick upstream）— 会话列表新增最近活动视图；文件夹右键支持终端操作。
+- **Ctrl+Click 外部文件预览**（cherry-pick upstream）— Ctrl+Click 在外部打开文件、Ctrl+RightClick 在资源管理器中显示，支持图片缩略图预览。
+
+### Changed
+
+- **模型显示统一入口** — 删除 3 个重复 helper（Sidebar/ChatPanel 各一份 `getModelDisplayName` + InputBar `modelLabel`），新增 `resolveModelDisplay(rawModel)` 作为所有模型名显示的唯一入口。继承模式下通过 settings.json 的 `_MODEL_NAME` 映射（如 `claude-sonnet-4-6[1M]` → `deepseek-v4-pro`），有 provider 时走 `displayProviderModelName`。
+- **inherit 模式模型路由** — 无 GUI Provider（继承系统配置）时不再传 `--model` 给 CLI，完全交给 CLI 的 settings.json 路由（CC Switch 场景）。`resolveModelForSend` 在继承模式返回 `undefined`，三个 spawn 调用点（发送/预热/重试）统一使用；InputBar 模型切换检测加 `getActive()` 守卫，继承模式下切换 GUI 模型选择器不再重建会话。
+- **token 追踪统一**（cherry-pick upstream）— 改用 Claude 原生 JSONL token 数据，处理新 stream 子类型；`SessionMeta` 补 `thinkingTokens`/`totalThinkingTokens`。
+- **头像上传 + 上下文统计恢复**（cherry-pick upstream）— 修复 v1.0.7 同步中被破坏的 AI/用户头像上传和上下文统计展示。
+
+### Fixed
+
+- **通信可靠性：permission 静默吞错 + reader 死亡** — 根因是 `can_use_tool` 的 `let _ = emit_to_frontend(...)` 静默吞掉 emit 失败（"AskUserQuestion 回答了收不到"），以及 stdout reader 连续 10 次 emit 失败后永久退出（"通信中断需按停止重发"）。修复：permission emit 失败计入计数并打日志；reader 改为持续失败 60 秒才放弃。
+- **AskUserQuestion answers 键格式** — answers 的键必须是问题文本（`q.question`），原代码用索引（`String(qIdx)`）导致 claude 解析成 "The user did not answer the questions."。
+- **AskUserQuestion preview 渲染 + 点击锁定** — 选项的 `preview` 字段（聚焦/hover 显示）原本完全不渲染。新增 `hoverIdx` + `lockedIdx` 状态：点击选项锁定预览（再点解锁），解决"滚动时鼠标必经中间选项、hover 劫持预览"的结构性冲突。
+- **stdout 看门狗 + JSONL 兜底** — Windows 下 CLI stdout 走 pipe 时 Node.js 用块缓冲（4KB），短回复不足缓冲区大小卡在 CLI 进程内。reader 用 10s 超时包装 `next_line()`，超时后扫描 `~/.claude/projects/*/<session_id>.jsonl`，发现已完成的 assistant 消息则合成 NDJSON 发给前端。跟踪 `last_text_activity` 避免正常流误触发，`jsonl_emitted_assistant_count` 避免重复合成。
+- **CLI /resume 可见性** — CLI 通过 `promptSource: "sdk"` 和 `entrypoint: "sdk-cli"` 过滤 SDK/stream-json 会话。修复需全局替换（不只是首条 user 消息）：stdout reader 收到 `result` 消息时立即修复当前会话 JSONL（`promptSource`→`typed`、`entrypoint`→`cli`），CLI 进程退出时兜底，启动扫描以 `tokenicode_session_names.json` 为白名单。
+- **UTF-8 字节切片 panic** — `send_stdin` 日志 `&message[..len.min(80)]` 按字节切片，中文 UTF-8 每字 3 字节导致 byte 80 落在字符中间 → Rust panic。异步命令的 panic 被 tokio 静默吞掉 → follow-up 长中文消息无回复。新增 `safe_preview(s, max)`（按字符截断），替换全部 6 处同类切片（send_stdin、stdout 预览 ×2、control_request、stderr、启动会话扫描）。
+- **幽灵会话过滤** — 自动标题生成等后台任务会产生只含 `queue-operation` 的幽灵会话文件。`extract_session_info()` 改为检测是否存在 assistant 回复，列表三处跳过 `!has_assistant` 的会话；`delete_session()` 增加 `[TOKENICODE:session]` 日志。
+- **会话可见性互通** — 移除 tracked 会话过滤，CLI 终端创建的会话在 GUI 可见，两端会话完全互通。
+- **WebView2 数据目录隔离** — 隔离 WebView2 数据目录，防止多实例 COM 错误。
+- **会话元数据/凭据稳定化**（cherry-pick upstream v1.0.7）— 稳定 sessions/models/skills/credentials；Provider 凭据 DPAPI 加密；日志脱敏。
+- **CLI 更新与文件夹操作** — 修复 CLI 更新路径、文件夹终端操作等边缘场景。
+
+### Refactored
+
+- **文件树搜索** — 内存递归遍历（`collectMatches()`）改为 Rust 独立 `search_files` 磁盘扫描命令，搜索不依赖已加载的目录缓存。
+- **日志宏** — 自研 `tlog!` 宏因递归展开触发编译错误，改用 Rust 生态标准 `log` crate + `fern`。
+
+### Performance
+
+- **流式渲染优化**（cherry-pick upstream）— 流式输出改用纯文本替代 MarkdownRenderer，修复渲染风暴和空闲基线，降低 CPU 占用约 40%。
+- **文件 watcher 批量合并** — 200ms debounce 合并文件事件再 emit，防止 IPC 风暴。
+
+---
+
 ## [0.10.0] - 2026-04-05
 
 ### Added

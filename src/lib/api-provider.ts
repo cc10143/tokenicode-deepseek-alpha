@@ -17,6 +17,20 @@ const TIER_MAP: Record<string, 'opus' | 'sonnet' | 'haiku'> = {
 };
 
 /**
+ * Robust tier detection for model names that carry version/date suffixes
+ * (claude-haiku-4-5 vs claude-haiku-4-5-20251001) or context markers ([1M]),
+ * which exact ID matching in TIER_MAP misses. Upstream names (deepseek-v4-pro,
+ * deepseek-v4-flash) never contain these tier words, so they are unaffected.
+ */
+function tierFromModel(model: string): 'opus' | 'sonnet' | 'haiku' | undefined {
+  const lower = model.toLowerCase();
+  if (lower.includes('opus')) return 'opus';
+  if (lower.includes('sonnet')) return 'sonnet';
+  if (lower.includes('haiku')) return 'haiku';
+  return undefined;
+}
+
+/**
  * Result of model resolution — either a mapped model name or an error.
  */
 export type ModelResolution =
@@ -30,14 +44,14 @@ export type ModelResolution =
 export function resolveModelOrError(selectedModel: string): ModelResolution {
   const provider = useProviderStore.getState().getActive();
   if (!provider) {
-    // Inherit mode: map each Claude model ID to its upstream name via
-    // settings.json _MODEL_NAME. The user can switch tiers in the GUI
-    // without changing the CLI's actual routing (resolveModelForSend
-    // returns undefined in inherit mode, so --model is never passed).
+    // Inherit mode: map each Claude model ID to its upstream display name via
+    // settings.json _MODEL_NAME. The tier the user picks drives both the display
+    // and the --model value passed to the CLI (resolveModelForSend).
     const mappings = useSettingsStore.getState().modelMappings;
     if (mappings) {
       const tier = TIER_MAP[selectedModel];
-      if (tier && mappings[tier]) return { ok: true, model: mappings[tier] };
+      const display = tier ? mappings[tier]?.display : undefined;
+      if (display) return { ok: true, model: display };
     }
     // Fallback: before mappings load, show the selected model as-is
     return { ok: true, model: selectedModel };
@@ -96,13 +110,18 @@ export function resolveModelForProvider(selectedModel: string): string {
 
 /**
  * Model name to pass to the CLI via --model.
- * In inherit mode (no active provider) returns undefined so the CLI uses its own
- * settings.json model routing (e.g. CC-Switch) instead of being overridden by
- * the GUI's model selector.
+ * In inherit mode returns the settings.json _MODEL value for the selected tier
+ * (e.g. claude-sonnet-4-6[1M]) so the GUI model selector actually takes effect —
+ * CC-Switch's substring tier routing uses it to pick the upstream model. Returns
+ * undefined when the tier has no _MODEL mapping, letting the CLI use its own default.
  */
 export function resolveModelForSend(selectedModel: string): string | undefined {
-  if (!useProviderStore.getState().getActive()) return undefined;
-  return resolveModelForProvider(selectedModel);
+  const provider = useProviderStore.getState().getActive();
+  if (provider) return resolveModelForProvider(selectedModel);
+  const mappings = useSettingsStore.getState().modelMappings;
+  const tier = TIER_MAP[selectedModel];
+  if (mappings && tier && mappings[tier]?.pass) return mappings[tier]!.pass!;
+  return undefined;
 }
 
 /**
@@ -119,8 +138,9 @@ export function resolveModelDisplay(rawModel: string | undefined | null): string
   const mappings = useSettingsStore.getState().modelMappings;
   if (mappings) {
     const cleaned = rawModel.replace(/\s*\[1m\]\s*$/i, '').trim();
-    const tier = TIER_MAP[cleaned];
-    if (tier && mappings[tier]) return mappings[tier];
+    const tier = tierFromModel(cleaned);
+    const display = tier ? mappings[tier]?.display : undefined;
+    if (display) return display;
   }
   return displayProviderModelName(rawModel);
 }

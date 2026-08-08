@@ -1162,7 +1162,7 @@ export function InputBar() {
         const liveProviderId = useProviderStore.getState().activeProviderId || null;
         const liveResolvedModel = resolveModelForProvider(selectedModel);
         const liveSendModel = resolveModelForSend(selectedModel);
-        const liveContextWindow = getContextWindowForModel(liveResolvedModel, liveContextWindowMode);
+        const liveContextWindow = getContextWindowForModel(liveSendModel ?? liveResolvedModel, liveContextWindowMode);
         console.log('[TOKENICODE:session] starting session', { cwd, stdinId: preGeneratedId, mode: liveSessionMode, provider: liveProviderId });
         const session = await bridge.startSession({
           prompt: text,

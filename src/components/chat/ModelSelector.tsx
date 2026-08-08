@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, Fragment } from 'react';
-import { useSettingsStore, MODEL_OPTIONS } from '../../stores/settingsStore';
+import { useSettingsStore, MODEL_OPTIONS, MODEL_ID_BY_TIER } from '../../stores/settingsStore';
 import { useChatStore, generateMessageId } from '../../stores/chatStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useProviderStore } from '../../stores/providerStore';
@@ -27,6 +27,7 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const setSelectedModel = useSettingsStore((s) => s.setSelectedModel);
   const modelMappings = useSettingsStore((s) => s.modelMappings);
+  const inheritedActiveTier = useSettingsStore((s) => s.inheritedActiveTier);
   const activeProvider = useProviderStore((s) => {
     if (!s.activeProviderId) return null;
     return s.providers.find((p) => p.id === s.activeProviderId) ?? null;
@@ -53,7 +54,7 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
     if (!activeProvider && modelMappings) {
       return MODEL_OPTIONS.map((m) => {
         const tier = TIER_MAP[m.id];
-        const upstream = tier ? modelMappings[tier] : undefined;
+        const upstream = tier ? modelMappings[tier]?.display : undefined;
         if (upstream) {
           const label = `${m.short} → ${upstream}`;
           return { id: m.id, label, short: upstream, mapped: true, isExtra: false };
@@ -105,6 +106,21 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
       setSelectedModel(fallbackOption.id);
     }
   }, [displayOptions, fallbackOption, selectedModel, setSelectedModel]);
+
+  // On open, align the GUI selection with settings.json `model` tier in inherit
+  // mode so the selector doesn't show a tier different from what actually runs.
+  // Only syncs once (ref guard) so the user's later dropdown picks are kept.
+  const defaultSyncedRef = useRef(false);
+  useEffect(() => {
+    if (activeProvider) return;
+    if (defaultSyncedRef.current) return;
+    if (!inheritedActiveTier) return;
+    const modelId = MODEL_ID_BY_TIER[inheritedActiveTier];
+    if (modelId && TIER_MAP[selectedModel] !== inheritedActiveTier) {
+      setSelectedModel(modelId);
+    }
+    defaultSyncedRef.current = true;
+  }, [activeProvider, inheritedActiveTier, selectedModel, setSelectedModel]);
 
   const current = displayOptions.find((m) => m.id === selectedModel) || fallbackOption;
 

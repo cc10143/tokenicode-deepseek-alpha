@@ -27,6 +27,7 @@
 - **MCP HTTP/SSE 类型支持**：MCP 设置页可配置远程服务器（`url` + `headers`），不再只支持 stdio 命令行类型。
 - **Rust 诊断日志系统**：fern + log crate 替代 `eprintln!`，所有模块统一走文件日志，方便排查问题。
 - **CLI `/resume` 会话互通**：TOKENICODE 创建的会话现在也会出现在终端 `claude --resume` 交互式会话选择器中。通过在回合完成时自动修复 JSONL 中的 `promptSource` 和 `entrypoint` 字段，使 SDK/stream-json 模式创建的会话与终端交互模式创建的会话在 picker 中完全互通。三层保障：回合完成即时修复、进程退出兜底、启动时扫描修复历史会话。
+- **继承模式模型选择器真正生效**：未配置 GUI Provider（inherit 模式，CLI 走 `~/.claude/settings.json`）时，GUI 模型选择器现在会真正影响发送——选中 Sonnet/Opus/Haiku 后通过 settings.json 的 `_MODEL` 值（含 `[1M]` 上下文标记）传给 CLI，下拉列表显示各 tier 对应的上游模型名（`_MODEL_NAME`），并默认对齐到 settings.json 配置的当前 tier。之前选择器只是显示、不改变实际路由。
 
 ### v1.0.6
 

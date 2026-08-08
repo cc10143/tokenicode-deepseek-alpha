@@ -125,3 +125,31 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **诊断方法论教训**：间歇性 bug 用"分层探针"定位——前端心跳（JS 存活）、异步命令 echo（分发链路）、两条运行时 canary（运行时健康）、锁时序（锁死锁）、promise 创建日志（前端是否真的调用）。最后用"同步命令"探针把 panic 顶到主线程导致崩溃，才暴露真实 panic 点。关键转折：崩溃不是坏事，它把静默吞掉的 panic 显性化了。
 
 **判断"是否同类坑"**：修复前全盘 grep `&[a-zA-Z_]+[..` / `.len().min(N)]` 模式，逐个确认内容是否可能含多字节。安全豁免：checksum（ASCII hex）、盘符解析（ASCII）、`.find()` 匹配点（字符边界）、`is_char_boundary` 兜底处。
+
+## 2026-08-08 模型显示映射 miss：CLI 上报的 model 名变体未映射
+
+**症状**：聊天顶栏显示未映射的 Claude 内部名（`claude-haiku-4-5`），而右下角选择器正确显示上游名 `deepseek-v4-flash`。
+
+**根因**：`resolveModelDisplay` 用精确 ID 匹配 `TIER_MAP`，表键只有带日期后缀的 `claude-haiku-4-5-20251001`。CLI 上报的 model 来自 settings.json 的 `ANTHROPIC_DEFAULT_HAIKU_MODEL`（`claude-haiku-4-5`，无日期后缀）→ 匹配 miss → fallback 原样显示。sonnet/opus 因带 `[1M]` 被剥掉后命中，只有 haiku 暴露。**潜在同类**：`claude-opus-4-8[1M]` 剥掉后 `claude-opus-4-8` 也不在 TIER_MAP（表里只有 `claude-opus-4-6`），切 opus tier 时也会 miss。
+
+**修复**：`api-provider.ts` 新增 `tierFromModel()`（子串匹配 `opus`/`sonnet`/`haiku`），`resolveModelDisplay` 改用它。上游名 `deepseek-v4-pro/flash` 不含 tier 关键词，不会被误映射。`resolveModelOrError` 的 `TIER_MAP[selectedModel]`（GUI 受控 ModelId）保持不变。
+
+**验证**：vitest 新增 5 个 `resolveModelDisplay` 测试（含 `claude-haiku-4-5` 无日期、`claude-opus-4-8[1M]`、上游名不误伤）全过；tsc 通过。文档：D:\KaiFa\Claude GUI\CLAUDE.md 第 10 项 + 本文件已更新。
+
+## 2026-08-08 inherit 模式模型选择器真正生效（issue #7）
+
+**背景**：方案 7/10 只解决了 inherit 模式（无 GUI Provider）下模型**显示**，发送路径 `resolveModelForSend` 恒返回 `undefined` → CLI 永远用 settings.json `model` tier，GUI 选择器是 inert 的。
+
+**路由证据**（issue #7 详述）：CC Switch `map_model()` 子串 tier 匹配，上游别名（deepseek-v4-pro 等）静默落 default，只有 Claude tier 名路由正确 → `--model` 必须传 `_MODEL` 值（含 `[1M]`）。`[1M]` 是客户端上下文声明，非上游参数。
+
+**改动**（9 文件）：
+- **Rust** `get_cli_model_mappings`：返回 `{activeTier, mappings: {tier: {display, pass}}}`，`display`= `_MODEL_NAME` 剥 `[1M]`，`pass`= `_MODEL` 保留 `[1M]`
+- **settingsStore**：`modelMappings` 类型 `Record<string, ModelTierMapping>`（`display?`/`pass?`）；新增 `inheritedActiveTier`
+- **api-provider**：`resolveModelForSend` inherit 分支返回 `mappings[tier]?.pass`（无映射 → undefined → CLI 默认）；`resolveModelOrError` inherit 分支读 `.display`
+- **ModelSelector**：inherit 下拉显示上游名；一次性默认选中同步到 settings.json `model` tier（ref 守卫）
+- **3 个 spawn 调用点**（InputBar / ChatPanel pre-warm / useStreamProcessor 重试）：`model`= `resolveModelForSend`；`context_window`= `getContextWindowForModel(sendModel ?? resolvedModel, ...)`——**必须用 send 模型**，否则前端显式传的 `context_window` 覆盖 Rust 的 `[1M]` 检测，1M 被砍成 200K
+- **GeneralTab**：上下文窗口显示改用 send 模型；tier 映射显示读 `.display`
+
+**验证**：vitest 全量 21 通过、`tsc --noEmit` 干净、`cargo build --release --frozen` 通过。**commit 待提交**。
+
+**遗留**：`inheritedModel` 仍只加载不消费（legacy，未删）。

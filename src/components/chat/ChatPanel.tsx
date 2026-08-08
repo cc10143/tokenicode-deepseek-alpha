@@ -1036,7 +1036,7 @@ async function startDraftSession(folderPath: string) {
         thinkingSetting,
       ),
       provider_id: providerId || undefined,
-      context_window: getContextWindowForModel(resolvedModel, contextWindowMode),
+      context_window: getContextWindowForModel(sendModel ?? resolvedModel, contextWindowMode),
       permission_mode: mapSessionModeToPermissionMode(sessionMode),
       mcp_config_path: await getDefaultMcpConfigPath(),
     });

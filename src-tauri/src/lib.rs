@@ -919,8 +919,11 @@ fn get_cli_model_config() -> Result<Option<String>, String> {
     Ok(model.map(|m| m.to_string()).or(Some(tier)))
 }
 
-/// Read all tier→model_name mappings from ~/.claude/settings.json for inherit mode dropdown.
-/// Returns a JSON map like {"opus":"minimax-m2.5","sonnet":"deepseek-v4-pro","haiku":"deepseek-v4-flash"}.
+/// Read all tier model mappings from ~/.claude/settings.json for inherit mode.
+/// Returns JSON: {"activeTier":"haiku","mappings":{"opus":{"display":"minimax-m2.5","pass":"claude-opus-4-8[1M]"},"sonnet":{...},"haiku":{...}}}.
+/// display = upstream model name (_MODEL_NAME) for the dropdown; pass = the model
+/// name to send via --model (_MODEL, keeps the [1M] marker so the CLI uses the
+/// 1M context window).
 #[tauri::command]
 fn get_cli_model_mappings() -> Result<Option<String>, String> {
     let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
@@ -938,18 +941,42 @@ fn get_cli_model_mappings() -> Result<Option<String>, String> {
         None => return Ok(None),
     };
 
-    let mut map = serde_json::Map::new();
+    let active_tier = json
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+
+    let mut mappings = serde_json::Map::new();
     for tier in &["opus", "sonnet", "haiku"] {
-        let key = format!("ANTHROPIC_DEFAULT_{}_MODEL_NAME", tier.to_uppercase());
-        if let Some(val) = env.get(&key).and_then(serde_json::Value::as_str) {
-            map.insert(tier.to_string(), serde_json::Value::String(val.to_string()));
+        let upper = tier.to_uppercase();
+        let display = env
+            .get(&format!("ANTHROPIC_DEFAULT_{upper}_MODEL_NAME"))
+            .and_then(serde_json::Value::as_str);
+        let pass = env
+            .get(&format!("ANTHROPIC_DEFAULT_{upper}_MODEL"))
+            .and_then(serde_json::Value::as_str);
+        if display.is_none() && pass.is_none() {
+            continue;
         }
+        let mut entry = serde_json::Map::new();
+        if let Some(d) = display {
+            entry.insert("display".to_string(), serde_json::Value::String(strip_one_m_marker(d)));
+        }
+        if let Some(p) = pass {
+            entry.insert("pass".to_string(), serde_json::Value::String(p.to_string()));
+        }
+        mappings.insert(tier.to_string(), serde_json::Value::Object(entry));
     }
-    if map.is_empty() {
+    if mappings.is_empty() {
         return Ok(None);
     }
-    let result = serde_json::Value::Object(map);
-    Ok(Some(serde_json::to_string(&result).unwrap_or_default()))
+    let mut result = serde_json::Map::new();
+    result.insert("activeTier".to_string(), serde_json::Value::String(active_tier));
+    result.insert("mappings".to_string(), serde_json::Value::Object(mappings));
+    Ok(Some(serde_json::to_string(&serde_json::Value::Object(result)).unwrap_or_default()))
 }
 
 // --- Provider credential encryption (TK-303) ---

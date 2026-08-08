@@ -14,6 +14,14 @@ export type ColorTheme = 'black' | 'blue' | 'orange' | 'green';
 export type BackgroundTheme = 'garden' | 'sakura' | 'lake' | 'dusk' | 'ink' | 'vscode' | 'minimal';
 export type SecondaryPanelTab = 'files' | 'preview' | 'skills' | 'plugins';
 export type ModelId = 'claude-opus-4-6' | 'claude-opus-4-6-1m' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
+
+/** One tier's model config from ~/.claude/settings.json (inherit mode).
+ * display = upstream model name (_MODEL_NAME) shown in the dropdown;
+ * pass = model sent via --model (_MODEL, keeps the [1M] context marker). */
+export interface ModelTierMapping {
+  display?: string;
+  pass?: string;
+}
 export type SessionMode = 'code' | 'ask' | 'plan' | 'bypass';
 export type FontFamily = 'system' | 'microsoft' | 'sourceHan' | 'lxgw' | 'mono';
 /** CLI permission mode for the SDK control protocol */
@@ -49,6 +57,13 @@ export const MODEL_OPTIONS: { id: ModelId; label: string; short: string }[] = [
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', short: 'Sonnet 4.6' },
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', short: 'Haiku 4.5' },
 ];
+
+/** Default GUI ModelId for each tier, used to align the selector with settings.json `model` in inherit mode. */
+export const MODEL_ID_BY_TIER: Record<string, ModelId> = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5-20251001',
+};
 
 function migrateModelSelection(model: unknown): ModelId | undefined {
   if (typeof model !== 'string') return undefined;
@@ -143,8 +158,10 @@ interface SettingsState {
 
   /** Effective model read from ~/.claude/settings.json in inherit mode (transient, not persisted) */
   inheritedModel: string | null;
-  /** All tier→model_name mappings from settings.json (inherit mode dropdown). */
-  modelMappings: Record<string, string> | null;
+  /** All tier→{display,pass} mappings from settings.json (inherit mode dropdown + --model). */
+  modelMappings: Record<string, ModelTierMapping> | null;
+  /** Current tier from settings.json `model` field (inherit mode default selection). */
+  inheritedActiveTier: string | null;
 
   toggleSidebar: () => void;
   toggleSecondaryPanel: () => void;
@@ -216,6 +233,7 @@ export const useSettingsStore = create<SettingsState>()(
       agentPanelOpen: false,
       inheritedModel: null,
       modelMappings: null,
+      inheritedActiveTier: null,
       workingDirectory: '',
       selectedModel: 'claude-sonnet-4-6',
       sessionMode: 'bypass',
@@ -309,9 +327,18 @@ export const useSettingsStore = create<SettingsState>()(
         try {
           const raw = await bridge.getCliModelMappings();
           if (raw) {
-            const parsed = JSON.parse(raw) as Record<string, string>;
-            set(() => ({ modelMappings: parsed }));
-            bridge.frontendLog(`[settingsStore] loadModelMappings: ${Object.keys(parsed).length} tiers`);
+            const parsed = JSON.parse(raw) as {
+              activeTier?: string;
+              mappings?: Record<string, ModelTierMapping>;
+            };
+            const mappings = parsed.mappings ?? {};
+            set(() => ({
+              modelMappings: mappings,
+              inheritedActiveTier: parsed.activeTier ?? null,
+            }));
+            bridge.frontendLog(
+              `[settingsStore] loadModelMappings: ${Object.keys(mappings).length} tiers, active=${parsed.activeTier ?? 'none'}`,
+            );
           }
         } catch (e) {
           bridge.frontendLog(`[settingsStore] loadModelMappings failed: ${String(e)}`);

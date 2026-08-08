@@ -1731,7 +1731,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                   ),
                   session_mode: (sessionMode === 'ask' || sessionMode === 'plan') ? sessionMode : undefined,
                   provider_id: useProviderStore.getState().activeProviderId || undefined,
-                  context_window: getContextWindowForModel(retryResolvedModel, retryContextWindowMode),
+                  context_window: getContextWindowForModel(retrySendModel ?? retryResolvedModel, retryContextWindowMode),
                   permission_mode: mapSessionModeToPermissionMode(sessionMode),
                   mcp_config_path: await getDefaultMcpConfigPath(),
                 });

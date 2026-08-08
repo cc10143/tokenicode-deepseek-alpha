@@ -12,7 +12,7 @@ import {
 import { useProviderStore } from '../../stores/providerStore';
 import { useT } from '../../lib/i18n';
 import { displayProviderModelName } from '../../lib/deepseek-models';
-import { resolveModelForProvider } from '../../lib/api-provider';
+import { resolveModelForProvider, resolveModelForSend } from '../../lib/api-provider';
 import { AiAvatar } from '../shared/AiAvatar';
 import { UserAvatar } from '../shared/UserAvatar';
 import { AvatarCropModal } from './AvatarCropModal';
@@ -180,8 +180,11 @@ export function GeneralTab() {
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [cropTarget, setCropTarget] = useState<'ai' | 'user'>('ai');
   const actualModel = resolveModelForProvider(selectedModel);
-  const contextWindow = getContextWindowForModel(actualModel, contextWindowMode);
-  const compactThreshold = getAutoCompactThreshold(actualModel, contextWindowMode, autoCompactThresholdTokens);
+  // In inherit mode the context window is declared by the _MODEL value passed to
+  // the CLI (may carry a [1M] marker), not the upstream display name.
+  const contextModel = resolveModelForSend(selectedModel) ?? actualModel;
+  const contextWindow = getContextWindowForModel(contextModel, contextWindowMode);
+  const compactThreshold = getAutoCompactThreshold(contextModel, contextWindowMode, autoCompactThresholdTokens);
   const tierMappings = activeProvider?.modelMappings
     .filter((m) => ['opus', 'sonnet', 'haiku'].includes(m.tier) && m.providerModel)
     .map((m) => `${m.tier}=${displayProviderModelName(m.providerModel)}`)
@@ -468,7 +471,7 @@ export function GeneralTab() {
                   if (!activeProvider) {
                     const mappings = useSettingsStore.getState().modelMappings;
                     const tier = TIER_MAP[model.id];
-                    if (mappings && tier && mappings[tier]) return mappings[tier];
+                    if (mappings && tier && mappings[tier]?.display) return mappings[tier]!.display!;
                     return model.short;
                   }
                   const tier = TIER_MAP[model.id];

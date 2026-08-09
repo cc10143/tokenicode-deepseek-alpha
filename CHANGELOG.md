@@ -6,6 +6,14 @@ All notable changes to TOKENICODE will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **验证式 auto-compact（issue #8）** — 消费 CLI 2.1.195 的 `compact_boundary` 事件：压缩完成后立即刷新上下文占用（`contextInputTokens = post_tokens`，让 auto-compact 判据自然失效），命令卡显示 `pre → post tokens (-X%)`。auto-compact 从一次性 flag 改为验证式 + 重试（60s 未确认自动重试，最多 3 次，耗尽标失败）。手动 `/compact` 不再由 `result` 抢先标完成——延迟 3s 等 `compact_boundary` 优先，超时读会话 JSONL 校正 Ctx + result 文本兜底标完成，避免命令卡永久 running。
+
+---
+
 ## [1.0.8] - 2026-08-08
 
 > 本节为 fork 合入 upstream v1.0.8（`a51edd7`）的修复。冲突点按 fork 定制优先保留。

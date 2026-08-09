@@ -172,3 +172,22 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：tsc exit 0、vitest 21 通过、`cargo test test_session_tokens` 通过（新增 `test_session_tokens_use_latest_context_and_deduplicate_blocks`）、`pnpm tauri build --no-bundle` exit 0（tokenicode.exe 生成）。
 
 **注意**：v1.0.8 是手动合入（直接编辑），不是 cherry-pick，因为改动与我们 fork 有重叠（compute 逻辑在本地已存在，日志段重叠）。下次同步起点仍是 upstream `9c3bb65` 之后。
+
+## 2026-08-09 验证式 auto-compact（issue #8，commit `facea32`）
+
+**背景**：CLI 原生自动压缩在 stream-json 模式下不可靠（issue #3561 autoclose 未修），fork 自带的 auto-compact 用一次性 flag `autoCompactFiredRef`，无验证、失败不重试，是最弱一环。
+
+**协议事实**（CLI 2.1.195 二进制确认，写成 issue #8）：
+- `compact_boundary` 是压缩完成的**确定信号**，带 token 数值：`{type:"system", subtype:"compact_boundary", compact_metadata:{trigger:enum("manual","auto"), pre_tokens, post_tokens, preservedMessages}}`
+- `compact_result`（status 事件）只有 `success`/`error` 枚举，**不带 token 数值** → 无法据此刷新 Ctx，必须靠 `compact_boundary`
+- **CLI 没有汇报上下文占用的斜杠命令**（无 `/context`）；`/usage` `/cost` 在 fork 里是**前端本地实现**（显示 fork 缓存的数据，不透传 CLI），不是兜底
+- CLI `/compact` 会把生成的会话摘要作为一条 **user 消息注入**（`This session is being continued...`），GUI 如实显示——这就是"压缩后屏幕上冒出非用户输入的英文长文"的来源，不是旧回合重放
+
+**修复**（`useStreamProcessor.ts` / `InputBar.tsx`）：
+1. 消费 `compact_boundary`：压缩完成即 `setSessionMeta({contextInputTokens: post_tokens})` 刷新 Ctx（让 auto-compact 判据自然失效）+ 命令卡显示 `pre → post (-X%)`；`compact_result` 也置 confirmed 对齐判据
+2. auto-compact 一次性 flag → 验证式 + 重试：`compactInFlightRef`（防重入）/ `compactRetryRef`（MAX=3）/ `compactConfirmedRef`，60s 未确认自动重试，耗尽标失败
+3. `result` 分支 guard：`/compact` 不抢先标完成（否则掩盖未验证的压缩）；用 `compactInFlightRef.current` 区分 auto/manual——auto 交给 60s 重试，手动 `/compact` 延迟 3s 等 `compact_boundary`，超时读 JSONL（`get_session_tokens`）校正 Ctx + result 文本兜底标完成
+
+**验证**：tsc exit 0、vitest 21/21、vite build 通过、cargo release build 通过（exe 已覆盖便携版）。真实 CLI 交互路径（compact_boundary 到达时序）需实际使用确认。
+
+**issue 拆分**：原 #8 拆为 #8（验证式 auto-compact，本次实现）+ #9（协议层抽象，`lib.rs` 拆 `protocol/*` 模块，待排期，排在 #8 之后）。

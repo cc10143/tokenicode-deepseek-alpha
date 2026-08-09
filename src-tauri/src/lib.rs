@@ -1925,6 +1925,11 @@ async fn start_claude_session(
         let mut last_text_activity = spawn_time;
         let mut jsonl_emitted_assistant_count: usize = 0;
         let mut jsonl_metadata_fixed: bool = false;
+        // Watchdog fires only during an active CLI turn (spawn → result). Receiving
+        // `result` marks the turn complete and disarms it, so the normal idle
+        // silence after a turn is never mistaken for a stdout stall (issue #10).
+        let mut watchdog_armed: bool = true;
+        let mut jsonl_baseline_inited: bool = false;
         loop {
             let line = match tokio::time::timeout(std::time::Duration::from_secs(10), lines.next_line()).await {
                 Ok(Ok(Some(line))) => line,
@@ -1937,7 +1942,12 @@ async fn start_claude_session(
                     break;
                 }
                 Err(_) => {
-                    // JSONL watchdog: stdout silent for 10s, check if CLI wrote response to JSONL
+                    // JSONL watchdog: only fire during an active CLI turn (spawn → result).
+                    // Receiving `result` disarms the watchdog (issue #10) — the idle silence
+                    // after a completed turn is normal, not a stdout stall.
+                    if !watchdog_armed {
+                        continue;
+                    }
                     if let Some(ref cid) = cli_session_id {
                         if last_text_activity.elapsed() > std::time::Duration::from_secs(10) {
                             if jsonl_path_cache.is_none() {
@@ -1958,6 +1968,29 @@ async fn start_claude_session(
                             }
                             if let Some(ref jsonl_path) = jsonl_path_cache {
                                 if let Ok(content) = std::fs::read_to_string(jsonl_path) {
+                                    // Baseline: on first scan, set the emit counter to the last
+                                    // existing end_turn assistant so historical messages are never
+                                    // replayed as "not yet delivered" (issue #10).
+                                    if !jsonl_baseline_inited {
+                                        let mut idx: usize = 0;
+                                        let mut last_end_turn: usize = 0;
+                                        for jsonl_line in content.lines() {
+                                            let j = match serde_json::from_str::<Value>(jsonl_line) {
+                                                Ok(j) => j, Err(_) => continue,
+                                            };
+                                            if j.get("type").and_then(|v| v.as_str()) != Some("assistant") { continue; }
+                                            idx += 1;
+                                            let stop = j.get("message").and_then(|m| m.get("stop_reason"))
+                                                .and_then(|v| v.as_str()).unwrap_or("");
+                                            if stop == "end_turn" { last_end_turn = idx; }
+                                        }
+                                        jsonl_emitted_assistant_count = last_end_turn;
+                                        jsonl_baseline_inited = true;
+                                        log::info!(
+                                            "[TOKENICODE:watchdog] baseline set to {} end_turn assistants (skip history)",
+                                            last_end_turn
+                                        );
+                                    }
                                     let mut assistant_idx: usize = 0;
                                     for jsonl_line in content.lines() {
                                         let j = match serde_json::from_str::<Value>(jsonl_line) {
@@ -2090,9 +2123,16 @@ async fn start_claude_session(
                 }
             }
 
-            // Update watchdog activity timestamp for non-thinking content
+            // Update watchdog activity timestamp for non-thinking content, and toggle the
+            // armed state: a turn is active while the CLI streams a response; receiving
+            // `result` marks it complete and disarms the watchdog (issue #10).
             match json.get("type").and_then(|v| v.as_str()) {
-                Some("assistant") | Some("result") => {
+                Some("result") => {
+                    watchdog_armed = false;
+                    last_text_activity = std::time::Instant::now();
+                }
+                Some("assistant") => {
+                    watchdog_armed = true;
                     last_text_activity = std::time::Instant::now();
                 }
                 Some("stream_event") => {
@@ -2101,6 +2141,7 @@ async fn start_claude_session(
                         || (evt["type"] == "content_block_start"
                             && evt["content_block"]["type"] == "text");
                     if is_text {
+                        watchdog_armed = true;
                         last_text_activity = std::time::Instant::now();
                     }
                 }

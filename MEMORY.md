@@ -191,3 +191,24 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：tsc exit 0、vitest 21/21、vite build 通过、cargo release build 通过（exe 已覆盖便携版）。真实 CLI 交互路径（compact_boundary 到达时序）需实际使用确认。
 
 **issue 拆分**：原 #8 拆为 #8（验证式 auto-compact，本次实现）+ #9（协议层抽象，`lib.rs` 拆 `protocol/*` 模块，待排期，排在 #8 之后）。
+
+## 2026-08-09 stdout 看门狗误触发重放历史（issue #10）
+
+**现象**：长历史会话中，CLI 回合完成后停顿 >10s，stdout 看门狗把会话历史里所有 `stop_reason=="end_turn"` 的 assistant 逐条合成 emit 给前端（每 10 秒一条），GUI 屏幕把整个历史重放一遍。用户误以为 CLI 在 compact 后继续回答旧问题。
+
+**根因**（三层叠加）：
+1. **触发条件过宽（核心）**：看门狗只看 `last_text_activity.elapsed() > 10s`，无法区分"stdout 真卡住（块缓冲，方案 8 目标）"vs"CLI 回合正常完成、等待下一条输入"。CLI 回合完成（result 到达）后 stdout 进入等待输入的静默，10s 后看门狗误判"卡住"触发。
+2. **基线错误**：`jsonl_emitted_assistant_count` 初始化为 0，没排除会话已有历史。看门狗从头扫描 JSONL，把第一条 `> count` 的 end_turn 历史当成"前端未收到"合成，break；下次触发再合成下一条 → 逐条重放整个历史。
+3. **前端去重失效（放大）**：流式 assistant 文本 id = `${msg.uuid}_text_${blockIdx}`（useStreamProcessor L1341），`parseSessionMessages` 加载历史 id = `msg.uuid`（session-loader L123）。id 格式不一致，`addMessage` 的按 id 去重被绕过，看门狗合成的每条历史都作为新消息追加。
+
+**为什么长历史会话才可见**：新建/短会话前端消息都是 stdout 流式来的（id=`uuid_text_N`），看门狗合成同条 id 一致 → 去重，无感；长历史会话历史以 `uuid` 加载，看门狗合成 `uuid_text_N` → 去重绕过 → 逐条追加。日志显示看门狗自 8/5 起频繁触发（100+ 条 synthesizing 记录），只有这次（长历史会话 + 停顿 >10s）可见。
+
+**修复**（`lib.rs` watchdog，方案 1 + 2）：
+1. **armed 门控**：`watchdog_armed` spawn 时 true；stdout 收到 `result` → false（回合完成，stdout 通畅）；收到 assistant/text → true（回合活动）。Err(_) 分支开头 `if !watchdog_armed { continue; }`。看门狗只在 CLI 回合进行中（spawn→result）触发，回合完成后的正常静默不再误触发。
+2. **基线**：首次扫描 JSONL 时把 `jsonl_emitted_assistant_count` 设为最后一个 end_turn assistant 序号（`jsonl_baseline_inited` 标记），历史永不被当成"未送达"重放。
+
+**方案 8 保留**：stdout 真卡住时 result 不达，armed 保持 true，看门狗仍补发当前回合新消息；前端按 id 去重，重复补发无害。
+
+**验证**：cargo check + release 构建通过（3 warning 均为既有 dead_code），exe 覆盖便携版 `D:\TOKENICODE\tokenicode-deepseek-alpha.exe`。真实 CLI 交互（长历史会话回合后停顿 >10s 不再重放）需实际使用确认。
+
+**issue**：[#10](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/10)

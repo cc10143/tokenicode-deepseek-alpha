@@ -11,6 +11,7 @@ All notable changes to TOKENICODE will be documented in this file.
 ### Fixed
 
 - **验证式 auto-compact（issue #8）** — 消费 CLI 2.1.195 的 `compact_boundary` 事件：压缩完成后立即刷新上下文占用（`contextInputTokens = post_tokens`，让 auto-compact 判据自然失效），命令卡显示 `pre → post tokens (-X%)`。auto-compact 从一次性 flag 改为验证式 + 重试（60s 未确认自动重试，最多 3 次，耗尽标失败）。手动 `/compact` 不再由 `result` 抢先标完成——延迟 3s 等 `compact_boundary` 优先，超时读会话 JSONL 校正 Ctx + result 文本兜底标完成，避免命令卡永久 running。
+- **stdout 看门狗误触发重放历史修复（issue #10）** — 看门狗原先只看 `last_text_activity` 静默 10s，无法区分"stdout 真卡住（块缓冲）"与"CLI 回合正常完成、等待下一条输入"。长历史会话中，回合完成后停顿 >10s 会把整个会话历史逐条合成重放（每 10 秒一条，前端因流式 id `uuid_text_N` 与加载 id `uuid` 不一致绕过去重）。修复：① 引入 `watchdog_armed` 门控——stdout 收到 `result` 即 disarm，看门狗只在 CLI 回合进行中（spawn→result）触发；② 首次扫描 JSONL 时把 `jsonl_emitted_assistant_count` 基线设为最后一个 `end_turn` assistant 序号，历史永不被当成"未送达"重放。方案 8 的块缓冲补发能力保留。
 
 ---
 

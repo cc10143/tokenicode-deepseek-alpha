@@ -187,6 +187,11 @@ forked from mistydew/tokenicode-deepseek-alpha。
 1. 消费 `compact_boundary`：压缩完成即 `setSessionMeta({contextInputTokens: post_tokens})` 刷新 Ctx（让 auto-compact 判据自然失效）+ 命令卡显示 `pre → post (-X%)`；`compact_result` 也置 confirmed 对齐判据
 2. auto-compact 一次性 flag → 验证式 + 重试：`compactInFlightRef`（防重入）/ `compactRetryRef`（MAX=3）/ `compactConfirmedRef`，60s 未确认自动重试，耗尽标失败
 3. `result` 分支 guard：`/compact` 不抢先标完成（否则掩盖未验证的压缩）；用 `compactInFlightRef.current` 区分 auto/manual——auto 交给 60s 重试，手动 `/compact` 延迟 3s 等 `compact_boundary`，超时读 JSONL（`get_session_tokens`）校正 Ctx + result 文本兜底标完成
+4. **`compact_result` 区分 success/error（2026-08-09 补丁）**：原 `if (msg.compact_result)` 把 error 当确认，命令卡只显示 `Compact error` 不重试，用户误以为压缩成功。改为 `=== 'success'` 才确认；error 时用 `compactInFlightRef` 区分 auto/manual——
+   - **auto**：`compactRetryRef += 1` + 释放 in-flight + `compactConfirmedRef = true`（阻止 60s 定时器对同一尝试重复记账），命令卡显示「自动压缩失败, 可手动输入 /compact 重试」；下轮 result 仍超阈值会重新触发（最多 3 次），不立即重发（与超时逻辑一致，避免打爆 CLI）
+   - **manual**：命令卡显示「Compact 失败, 可重新输入 /compact 重试」，completed；**不动 `compactRetryRef`**（避免用户手动失败污染 auto 的重试计数）
+   - foreground（`handleStreamMessage`）+ background（`handleBackgroundStreamMessage`）两处 handler 同步改
+   - 手动失败仅回 `result` 不带 `compact_result` 的场景仍由 3s 兜底覆盖，无需改
 
 **验证**：tsc exit 0、vitest 21/21、vite build 通过、cargo release build 通过（exe 已覆盖便携版）。真实 CLI 交互路径（compact_boundary 到达时序）需实际使用确认。
 

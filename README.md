@@ -33,7 +33,7 @@
 - **Rust 诊断日志系统**：fern + log crate 替代 `eprintln!`，所有模块统一走文件日志，方便排查问题。
 - **CLI `/resume` 会话互通**：TOKENICODE 创建的会话现在也会出现在终端 `claude --resume` 交互式会话选择器中。通过在回合完成时自动修复 JSONL 中的 `promptSource` 和 `entrypoint` 字段，使 SDK/stream-json 模式创建的会话与终端交互模式创建的会话在 picker 中完全互通。三层保障：回合完成即时修复、进程退出兜底、启动时扫描修复历史会话。
 - **继承模式模型选择器真正生效**：未配置 GUI Provider（inherit 模式，CLI 走 `~/.claude/settings.json`）时，GUI 模型选择器现在会真正影响发送——选中 Sonnet/Opus/Haiku 后通过 settings.json 的 `_MODEL` 值（含 `[1M]` 上下文标记）传给 CLI，下拉列表显示各 tier 对应的上游模型名（`_MODEL_NAME`），并默认对齐到 settings.json 配置的当前 tier。之前选择器只是显示、不改变实际路由。
-- **验证式 auto-compact**：消费 CLI 2.1.195 的 `compact_boundary` 事件——压缩完成后立即刷新上下文占用显示（命令卡显示 `pre → post tokens (-X%)`），auto-compact 从一次性触发改为验证式 + 重试（最多 3 次，60 秒未确认自动重试），手动 `/compact` 命令卡不再卡死（延迟等待压缩确认，超时后从会话 JSONL 校正上下文占用并兜底标记完成）。
+- **验证式 auto-compact**：消费 CLI 2.1.195 的 `compact_boundary` 事件——压缩完成后立即刷新上下文占用显示（命令卡显示 `pre → post tokens (-X%)`），auto-compact 从一次性触发改为验证式 + 重试（最多 3 次，60 秒未确认自动重试），手动 `/compact` 命令卡不再卡死（延迟等待压缩确认，超时后从会话 JSONL 校正上下文占用并兜底标记完成）。压缩失败（CLI 显式回 `compact_result: error`）会明确告知用户——自动压缩失败提示可手动输入 `/compact` 重试，手动 `/compact` 失败同样提示重新输入，不再静默当成成功。
 - **stdout 看门狗误触发修复**：看门狗原只看 stdout 静默 10 秒，无法区分"块缓冲卡住"和"CLI 回合完成、等待下一条输入"。长历史会话中回合完成后停顿超过 10 秒，会触发整个会话历史逐条重放。现引入 armed 门控（stdout 收到 `result` 即解除，只在 CLI 回合进行中触发）+ 基线（首次扫描跳过已有历史），看门狗只补发本次会话新增的消息，块缓冲补发能力保留。
 
 ### v1.0.6

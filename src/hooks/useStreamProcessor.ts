@@ -829,7 +829,9 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
               commandCompleted: true,
               commandData: {
                 ...(store.getTab(tabId)?.messages ?? []).find((m) => m.id === cmdMsgId)?.commandData,
-                output: `Compact ${msg.compact_result}`,
+                output: msg.compact_result === 'success'
+                  ? 'Compact 完成'
+                  : 'Compact 失败, 可重新输入 /compact 重试',
                 completedAt: Date.now(),
               },
             });
@@ -1227,8 +1229,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             });
           }
         } else if (msg.subtype === 'status') {
-          if (msg.compact_result) {
-            // compact_result 也是压缩完成的确定信号（与 compact_boundary 任一确认即可）,
+          if (msg.compact_result === 'success') {
+            // compact_result 是压缩完成的确定信号（与 compact_boundary 任一确认即可）,
             // 置 confirmed 避免 60s 超时兜底误判重试
             compactConfirmedRef.current = true;
             compactInFlightRef.current = false;
@@ -1238,7 +1240,37 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                 commandCompleted: true,
                 commandData: {
                   ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
-                  output: `Compact ${msg.compact_result}`,
+                  output: 'Compact 完成',
+                  completedAt: Date.now(),
+                },
+              });
+              useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+              if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
+                useChatStore.getState().setSessionStatus(tabId, 'idle');
+              }
+            }
+          } else if (msg.compact_result) {
+            // compact_result 为 "error"（CLI 明确压缩失败）。
+            // auto-compact（compactInFlightRef）: 记一次失败并释放 in-flight,
+            // 下轮 result 若仍超阈值会重新触发（最多 MAX_COMPACT_RETRIES 次）;
+            // manual /compact: 命令卡标失败, 用户自行决定重试, 不动 compactRetryRef
+            // （避免用户手动失败污染 auto 的重试计数）。
+            const isAuto = compactInFlightRef.current;
+            if (isAuto) {
+              compactRetryRef.current += 1;
+              // 终结本次尝试: confirmed 置 true, 阻止 60s 定时器对同一尝试重复记账
+              compactConfirmedRef.current = true;
+            }
+            compactInFlightRef.current = false;
+            const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
+            if (pendingCmd) {
+              useChatStore.getState().updateMessage(tabId, pendingCmd, {
+                commandCompleted: true,
+                commandData: {
+                  ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
+                  output: isAuto
+                    ? '自动压缩失败, 可手动输入 /compact 重试'
+                    : 'Compact 失败, 可重新输入 /compact 重试',
                   completedAt: Date.now(),
                 },
               });

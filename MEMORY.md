@@ -229,3 +229,21 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：tsc exit 0、vitest 22/22、vite build 通过、tauri build 打包 exe。
 
 **决策记录**：用户选择**最小对齐（方案 A）**而非结构化 id（方案 B：ChatMessage 加稳定 id + block 次键、addMessage 去重键改复合键）。理由：B 是面向假想需求的建模，成本高（碰 addMessage 20+ 调用点、rewind/时间线），且 CLI text block 无自身 id（只有 tool_use 有），blockIndex 漂移问题 A/B 同样存在，B 不解决根本。tool_use/question/todo 用 CLI 稳定 `block.id` 两边一致，不在此改动范围。
+
+## 2026-08-09 Ctx 一直显示 0% 修复（CLI 2.1.195 message_start usage 全 0，issue #8 残留）
+
+**症状**：打开历史会话 Ctx 一直显示 0%，`/compact` 后才正常（显示压缩后的低百分比）；live 对话中 Ctx 永不更新。
+
+**根因**（真实 CLI 诊断确认，`STREAM_EVENT_TYPES={}` 且 message_start usage 全 0）：
+1. **CLI 2.1.195 stream-json 的 `message_start` 事件 `message.usage` 全为 0**（`{input_tokens:0, output_tokens:0}`），真实 usage 只在 `result`（诊断实测 `{input:43244, cache_read:1024, output:122}`）。这是 CLI 行为，非 TOKENICODE bug。
+2. **v1.0.8 同步（`64c61f6`）删除了 result 段两处 `contextSnapshot(msg.usage)` 调用**（CLAUDE.md 第 13 项），认为 message_start 段足够。但前端 `contextSnapshot` 依赖 `hasMeaningfulContextUsage`，message_start usage 全 0 → 返回 null → `contextInputTokens` 永不更新。
+3. 唯一能设置 `contextInputTokens` 的是 `compact_boundary`（/compact 后）→ 用户看到"一直 0%，/compact 后才 1%"。
+
+**修复**（commit `59abd86`，3 文件 26 行）：
+1. **`useStreamProcessor.ts`**：恢复 foreground（L1988）+ background（L681）两处 result 段 `contextSnapshot(msg.usage)`，result 携带权威 usage，用它刷新 `contextInputTokens`/`contextOutputTokens`。这是核心修复。
+2. **`ConversationList.tsx`**：打开历史会话命中内存缓存（`restoreFromCache`）时，原本跳过 `getSessionTokens` → 缓存里 `contextInputTokens` 是 undefined → Ctx 0%。新增从 JSONL backfill token 数据。
+3. **`App.tsx` reconnect**：JSONL cross-check 原本只恢复 `totalInputTokens`/`totalOutputTokens`，补恢复 `contextInputTokens`/`contextOutputTokens`。
+
+**验证**：真实 result usage 模拟 → `contextInputTokens = 44268`（非 0）✓；tsc 干净；vitest 22/22；vite build + cargo release 构建通过；便携版已覆盖。
+
+**协议事实**（写进 debug 笔记）：CLI 2.1.195 下 stream-json 输出中 `assistant` 顶层消息 usage 也是 0，`result` 才有完整 usage——**任何依赖 message_start/assistant usage 的 token 统计都会读到 0**。排查 token/上下文问题时先确认事件来源。v1.0.8 删除 result 段快照是本次回归的引入点。

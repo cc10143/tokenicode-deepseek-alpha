@@ -36,6 +36,7 @@
 - **验证式 auto-compact**：消费 CLI 2.1.195 的 `compact_boundary` 事件——压缩完成后立即刷新上下文占用显示（命令卡显示 `pre → post tokens (-X%)`），auto-compact 从一次性触发改为验证式 + 重试（最多 3 次，60 秒未确认自动重试），手动 `/compact` 命令卡不再卡死（延迟等待压缩确认，超时后从会话 JSONL 校正上下文占用并兜底标记完成）。压缩失败（CLI 显式回 `compact_result: error`）会明确告知用户——自动压缩失败提示可手动输入 `/compact` 重试，手动 `/compact` 失败同样提示重新输入，不再静默当成成功。
 - **stdout 看门狗误触发修复**：看门狗原只看 stdout 静默 10 秒，无法区分"块缓冲卡住"和"CLI 回合完成、等待下一条输入"。长历史会话中回合完成后停顿超过 10 秒，会触发整个会话历史逐条重放。现引入 armed 门控（stdout 收到 `result` 即解除，只在 CLI 回合进行中触发）+ 基线（首次扫描跳过已有历史），看门狗只补发本次会话新增的消息，块缓冲补发能力保留。
 - **assistant 消息 id 对齐**：历史加载与实时流式的 assistant 文本/思考消息 id 统一为 `${uuid}_text_N` / `${uuid}_thinking_N`（N 为 content 数组原始下标）。此前加载历史用裸 `uuid`、流式用带下标格式，两套规则让按 id 去重被绕过；统一后任何"把 JSONL 记录补发给前端"的路径都能被去重兜住。附带契约测试锁定 id 规则。
+- **Ctx 上下文占用恢复（CLI 2.1.195 兼容）**：CLI 2.1.195 的 stream-json 输出中 `message_start` 事件 usage 全为 0，真实 usage 只在 `result`。本 fork 从 `result` 事件恢复 `contextInputTokens` 快照，并让打开历史会话（命中内存缓存）与 App 重启 reconnect 时从会话 JSONL 回填上下文占用——修复"打开历史会话 Ctx 一直显示 0%，/compact 后才正常"。
 
 ### v1.0.6
 

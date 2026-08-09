@@ -380,6 +380,20 @@ export function ConversationList() {
       if (projectOrDir) {
         useSettingsStore.getState().setWorkingDirectory(resolveProjectPath(projectOrDir));
       }
+      // Cache may lack a context snapshot: v1.0.8 removed the result-based
+      // contextInputTokens update, so tabs opened before that fix (or resumed
+      // live) keep Ctx at 0% until /compact. Backfill from the authoritative JSONL.
+      bridge.getSessionTokens(sessionId).then((tokenUsage) => {
+        if (!tokenUsage || !useChatStore.getState().getTab(sessionId)) return;
+        useChatStore.getState().setSessionMeta(sessionId, {
+          inputTokens: tokenUsage.contextInputTokens,
+          outputTokens: tokenUsage.contextOutputTokens,
+          contextInputTokens: tokenUsage.contextInputTokens,
+          contextOutputTokens: tokenUsage.contextOutputTokens,
+          totalInputTokens: tokenUsage.totalInputTokens,
+          totalOutputTokens: tokenUsage.totalOutputTokens,
+        });
+      }).catch(() => {});
       return;
     }
 

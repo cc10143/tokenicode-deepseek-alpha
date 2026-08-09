@@ -243,6 +243,10 @@ function App() {
             const corrected = {
               totalInputTokens: Math.max(current.totalInputTokens ?? 0, jsonlTokens.totalInputTokens),
               totalOutputTokens: Math.max(current.totalOutputTokens ?? 0, jsonlTokens.totalOutputTokens),
+              // context snapshot from JSONL (CLI 2.1.195 message_start usage is all-zeros,
+              // so live-stream never populates contextInputTokens — backfill from disk)
+              contextInputTokens: jsonlTokens.contextInputTokens,
+              contextOutputTokens: jsonlTokens.contextOutputTokens,
             };
             chatState.setSessionMeta(tabId, corrected);
             console.log('[reconnect] JSONL cross-check for', tabId, jsonlTokens, '→ merged:', corrected);

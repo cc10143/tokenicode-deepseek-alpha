@@ -293,7 +293,9 @@ function _maybeRefreshFileTree(tabId: string, toolUseId?: string, toolName?: str
  */
 export interface StreamProcessorConfig {
   exitPlanModeSeenRef: MutableRefObject<boolean>;
-  autoCompactFiredRef: MutableRefObject<boolean>;
+  compactInFlightRef: MutableRefObject<boolean>;
+  compactRetryRef: MutableRefObject<number>;
+  compactConfirmedRef: MutableRefObject<boolean>;
   silentRestartRef: MutableRefObject<boolean>;
   handleSubmitRef: MutableRefObject<() => void>;
   handleStderrLineRef: MutableRefObject<(line: string, sid: string) => void>;
@@ -311,13 +313,18 @@ export interface StreamProcessorConfig {
 export function useStreamProcessor(config: StreamProcessorConfig) {
   const {
     exitPlanModeSeenRef,
-    autoCompactFiredRef,
+    compactInFlightRef,
+    compactRetryRef,
+    compactConfirmedRef,
     silentRestartRef,
     handleSubmitRef,
     handleStderrLineRef,
     lastStderrRef,
     setInputSync,
   } = config;
+
+  // Auto-compact: max retry attempts per session before giving up.
+  const MAX_COMPACT_RETRIES = 3;
 
   /**
    * Handle stream messages for a background (non-active) tab — route to cache.
@@ -1221,6 +1228,10 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
           }
         } else if (msg.subtype === 'status') {
           if (msg.compact_result) {
+            // compact_result 也是压缩完成的确定信号（与 compact_boundary 任一确认即可）,
+            // 置 confirmed 避免 60s 超时兜底误判重试
+            compactConfirmedRef.current = true;
+            compactInFlightRef.current = false;
             const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
             if (pendingCmd) {
               useChatStore.getState().updateMessage(tabId, pendingCmd, {
@@ -1237,6 +1248,36 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
               }
             }
           }
+        } else if (msg.subtype === 'compact_boundary') {
+          // --- 验证式 auto-compact: compact_boundary 是压缩完成的确定信号 ---
+          // CLI 2.1.195+ 输出: { type: "system", subtype: "compact_boundary",
+          //   compact_metadata: { trigger: "manual"|"auto", pre_tokens, post_tokens } }
+          const cm = msg.compact_metadata || {};
+          const pre = cm.pre_tokens ?? 0;
+          const post = cm.post_tokens ?? 0;
+          const reduced = pre > 0 && post < pre;   // 压缩确实发生: post < pre
+          // 压缩完成后立即刷新上下文占用, 让 auto-compact 判据自然失效
+          setSessionMeta({ contextInputTokens: post, contextOutputTokens: 0 });
+          const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
+          if (pendingCmd) {
+            const percent = reduced ? Math.round((1 - post / pre) * 100) : 0;
+            useChatStore.getState().updateMessage(tabId, pendingCmd, {
+              commandCompleted: true,
+              commandData: {
+                ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
+                output: reduced
+                  ? `Compact ${cm.trigger} 完成: ${pre.toLocaleString()} → ${post.toLocaleString()} tokens (-${percent}%)`
+                  : 'Compact 完成但上下文未下降',
+                completedAt: Date.now(),
+              },
+            });
+            useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+            if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
+              useChatStore.getState().setSessionStatus(tabId, 'idle');
+            }
+          }
+          compactConfirmedRef.current = true;
+          compactInFlightRef.current = false;
         } else {
           // FI-3: Log unknown subtypes so we know what we're missing
           console.warn('[TOKENICODE] Unhandled system subtype:', msg.subtype, msg);
@@ -1790,19 +1831,59 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
         }
         exitPlanModeSeenRef.current = false;
 
-        // Mark pending processing card (CLI slash command) as completed
+        // Mark pending processing card (CLI slash command) as completed.
+        // /compact's completion is confirmed by compact_boundary / status.compact_result,
+        // not by result — result would race ahead and mask an unverified compaction.
         const pendingCmdMsgId = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
         if (pendingCmdMsgId) {
-          const resultOutput = typeof msg.result === 'string' ? msg.result : '';
-          useChatStore.getState().updateMessage(tabId, pendingCmdMsgId, {
-            commandCompleted: true,
-            commandData: {
-              ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmdMsgId)?.commandData,
-              output: resultOutput,
-              completedAt: Date.now(),
-            },
-          });
-          useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+          const isCompact = useChatStore.getState().getTab(tabId)?.messages
+            .find((m) => m.id === pendingCmdMsgId)?.commandData?.command === '/compact';
+          if (!isCompact) {
+            const resultOutput = typeof msg.result === 'string' ? msg.result : '';
+            useChatStore.getState().updateMessage(tabId, pendingCmdMsgId, {
+              commandCompleted: true,
+              commandData: {
+                ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmdMsgId)?.commandData,
+                output: resultOutput,
+                completedAt: Date.now(),
+              },
+            });
+            useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+          } else if (!compactInFlightRef.current) {
+            // 手动 /compact: result 不抢先标完成, 延迟等 compact_boundary 优先。
+            // 3s 未确认 → 兜底: 读 JSONL 校正 Ctx (CLI 权威写盘数据) + 用 result 标完成。
+            // auto-compact (/compact via compactInFlightRef) 由 60s 重试逻辑负责, 不在此兜底。
+            const compactSessionId = useChatStore.getState().getTab(tabId)?.sessionMeta.sessionId;
+            setTimeout(() => {
+              // compact_boundary / status.compact_result 已确认 → pendingCommandMsgId 已被清空, 不重复兜底
+              if (useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId !== pendingCmdMsgId) return;
+              if (compactSessionId) {
+                bridge.getSessionTokens(compactSessionId)
+                  .then((tu) => {
+                    if (tu?.contextInputTokens != null) {
+                      useChatStore.getState().setSessionMeta(tabId, {
+                        contextInputTokens: tu.contextInputTokens,
+                        contextOutputTokens: tu.contextOutputTokens ?? 0,
+                      });
+                    }
+                  })
+                  .catch(() => {});
+              }
+              const resultOutput = typeof msg.result === 'string' ? msg.result : '';
+              useChatStore.getState().updateMessage(tabId, pendingCmdMsgId, {
+                commandCompleted: true,
+                commandData: {
+                  ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmdMsgId)?.commandData,
+                  output: resultOutput,
+                  completedAt: Date.now(),
+                },
+              });
+              useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+              if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
+                useChatStore.getState().setSessionStatus(tabId, 'idle');
+              }
+            }, 3_000);
+          }
         }
 
         // Extract result text for display (e.g., slash command output)
@@ -1927,7 +2008,8 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
 
         // --- Auto-compact: threshold follows the declared context window.
         // Default 200K models compact at 160K; declared 1M models compact at 800K.
-        // Fires at most once per session to avoid infinite loops.
+        // Verified via compact_boundary / status.compact_result — retries up to
+        // MAX_COMPACT_RETRIES, then gives up (marks the card failed).
         const compactMeta = useChatStore.getState().getTab(tabId)?.sessionMeta;
         const resultContextTokens = getContextUsedTokens({
           inputTokens: msg.usage?.input_tokens,
@@ -1943,9 +2025,14 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
           compactMode,
           useSettingsStore.getState().autoCompactThresholdTokens,
         );
-        if (resultContextTokens > autoCompactThreshold && !autoCompactFiredRef.current && compactStdinId && msg.subtype === 'success') {
-          autoCompactFiredRef.current = true;
-          console.log('[TOKENICODE] Auto-compact triggered:', { contextTokens: resultContextTokens, threshold: autoCompactThreshold });
+        if (resultContextTokens > autoCompactThreshold
+            && !compactInFlightRef.current
+            && compactRetryRef.current < MAX_COMPACT_RETRIES
+            && compactStdinId && msg.subtype === 'success') {
+          compactInFlightRef.current = true;
+          compactConfirmedRef.current = false;
+          console.log('[TOKENICODE] Auto-compact triggered (attempt', compactRetryRef.current + 1 + '):',
+            { contextTokens: resultContextTokens, threshold: autoCompactThreshold });
           const compactMsgId = generateMessageId();
           addMessage({
             id: compactMsgId,
@@ -1958,28 +2045,35 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             commandCompleted: false,
             timestamp: Date.now(),
           });
-          // FI-4: Register pendingCommandMsgId so result handler can mark it completed
+          // FI-4: Register pendingCommandMsgId so compact_boundary can mark it completed
           setSessionMeta({ pendingCommandMsgId: compactMsgId });
           setSessionStatus('running');
           setActivityStatus({ phase: 'thinking' });
           bridge.sendStdin(compactStdinId, '/compact').catch((err) => {
             console.error('[TOKENICODE] Auto-compact failed:', err);
+            compactInFlightRef.current = false;
           });
-          // FI-4: Timeout fallback — if compact doesn't complete within 90s, auto-complete
+          // 超时兜底: 60s 未确认 → 记一次失败并释放 in-flight,
+          // 下轮 result 若仍超阈值会重新触发 (最多 MAX_COMPACT_RETRIES 次)
           setTimeout(() => {
-            const meta = useChatStore.getState().getTab(tabId)?.sessionMeta ?? {};
-            if (meta.pendingCommandMsgId === compactMsgId) {
-              useChatStore.getState().updateMessage(tabId, compactMsgId, {
-                commandCompleted: true,
-                commandData: {
-                  ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === compactMsgId)?.commandData,
-                  output: 'Compact timed out',
-                  completedAt: Date.now(),
-                },
-              });
-              useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
-              if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
-                useChatStore.getState().setSessionStatus(tabId, 'idle');
+            if (!compactConfirmedRef.current) {
+              compactRetryRef.current += 1;
+              compactInFlightRef.current = false;
+              console.warn('[TOKENICODE] Auto-compact not confirmed, will retry on next result');
+              if (compactRetryRef.current >= MAX_COMPACT_RETRIES) {
+                // 重试耗尽: 标记命令卡失败, 不再重试
+                useChatStore.getState().updateMessage(tabId, compactMsgId, {
+                  commandCompleted: true,
+                  commandData: {
+                    ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === compactMsgId)?.commandData,
+                    output: `Auto-compact failed after ${MAX_COMPACT_RETRIES} attempts`,
+                    completedAt: Date.now(),
+                  },
+                });
+                useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+                if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
+                  useChatStore.getState().setSessionStatus(tabId, 'idle');
+                }
               }
             }
           }, 60_000); // Compact takes 20-30s through proxy; 60s gives enough headroom
@@ -2185,7 +2279,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
         });
       }
     }
-  }, [handleBackgroundStreamMessage, exitPlanModeSeenRef, autoCompactFiredRef, silentRestartRef, handleSubmitRef, handleStderrLineRef, setInputSync]);
+  }, [handleBackgroundStreamMessage, exitPlanModeSeenRef, compactInFlightRef, compactRetryRef, compactConfirmedRef, silentRestartRef, handleSubmitRef, handleStderrLineRef, setInputSync]);
 
   return { handleStreamMessage, handleBackgroundStreamMessage };
 }

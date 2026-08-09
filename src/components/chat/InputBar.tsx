@@ -413,8 +413,10 @@ export function InputBar() {
   const handleStderrLineRef = useRef<(line: string, sid: string) => void>(() => {});
   /** Last non-empty stderr line — shown to user if process exits without response */
   const lastStderrRef = useRef('');
-  /** Tracks whether auto-compact has been triggered in this session to avoid repeat fires */
-  const autoCompactFiredRef = useRef(false);
+  /** Auto-compact verification state: in-flight guard, retry count, confirmed flag */
+  const compactInFlightRef = useRef(false);
+  const compactRetryRef = useRef(0);
+  const compactConfirmedRef = useRef(false);
   /** Tracks ExitPlanMode in current turn for Code mode auto-restart */
   const exitPlanModeSeenRef = useRef(false);
   /** When true, next handleSubmit skips creating user message bubble (Code mode silent restart) */
@@ -423,7 +425,9 @@ export function InputBar() {
   // Stream processing hook — handles foreground + background stream messages
   const { handleStreamMessage } = useStreamProcessor({
     exitPlanModeSeenRef,
-    autoCompactFiredRef,
+    compactInFlightRef,
+    compactRetryRef,
+    compactConfirmedRef,
     silentRestartRef,
     handleSubmitRef,
     handleStderrLineRef,
@@ -1042,7 +1046,9 @@ export function InputBar() {
         sessionStdinId = preGeneratedId;
 
         // Reset guards for the new session
-        autoCompactFiredRef.current = false;
+        compactInFlightRef.current = false;
+        compactRetryRef.current = 0;
+        compactConfirmedRef.current = false;
         exitPlanModeSeenRef.current = false;
 
         // TK-329 fix: register stdinId → tabId mapping BEFORE listeners,

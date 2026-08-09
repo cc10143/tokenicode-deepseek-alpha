@@ -150,7 +150,7 @@ forked from mistydew/tokenicode-deepseek-alpha。
 - **3 个 spawn 调用点**（InputBar / ChatPanel pre-warm / useStreamProcessor 重试）：`model`= `resolveModelForSend`；`context_window`= `getContextWindowForModel(sendModel ?? resolvedModel, ...)`——**必须用 send 模型**，否则前端显式传的 `context_window` 覆盖 Rust 的 `[1M]` 检测，1M 被砍成 200K
 - **GeneralTab**：上下文窗口显示改用 send 模型；tier 映射显示读 `.display`
 
-**验证**：vitest 全量 21 通过、`tsc --noEmit` 干净、`cargo build --release --frozen` 通过。**commit 待提交**。
+**验证**：vitest 全量 21 通过、`tsc --noEmit` 干净、`cargo build --release --frozen` 通过。**commit** `7730478`。
 
 **遗留**：`inheritedModel` 仍只加载不消费（legacy，未删）。
 
@@ -222,7 +222,7 @@ forked from mistydew/tokenicode-deepseek-alpha。
 
 **问题**：assistant 消息 id 双格式不一致。流式（`useStreamProcessor` L1373/L1542）用 `${uuid}_text_${blockIdx}` / `${uuid}_thinking_${blockIdx}`（blockIdx = content 数组原始下标）；加载历史（`session-loader` L138/L212）text 用 `msg.uuid`、thinking 用 `${msg.uuid}_thinking_${messages.length}`。流式因 addMessage 按 id 去重 + 同回合多 text block 必须区分，设计了 block 级下标；加载历史直接 append 不经过 addMessage，就用了裸 uuid/运行计数——**没对齐**。加载产出的 id 后续被流式/看门狗消费时去重被绕过（#10 放大因素，根因已修，id 不一致本身仍是隐患）。
 
-**修复**（`session-loader.ts`，commit 待提交）：assistant 循环 `for..of` → `for (let blockIdx...)`；text id → `${msg.uuid}_text_${blockIdx}`、thinking id → `${msg.uuid}_thinking_${blockIdx}`。blockIdx 用**原始下标**（被 continue 跳过的 tool_use/system text 仍占位），与流式遍历同一 content 数组 → id 精确对齐。
+**修复**（`session-loader.ts`，commit `2f902f3`）：assistant 循环 `for..of` → `for (let blockIdx...)`；text id → `${msg.uuid}_text_${blockIdx}`、thinking id → `${msg.uuid}_thinking_${blockIdx}`。blockIdx 用**原始下标**（被 continue 跳过的 tool_use/system text 仍占位），与流式遍历同一 content 数组 → id 精确对齐。
 
 **契约测试**（`session-loader.test.ts`）：text block 用原始下标——tool_use 占 index 2 时第二个 text id 是 `asst-uuid-1_text_3` 而非 `_1`。把"加载与流式 id 一致"锁死。
 

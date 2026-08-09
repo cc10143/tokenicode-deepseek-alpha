@@ -131,11 +131,16 @@ export function parseSessionMessages(rawMessages: any[]): LoadedSession {
     } else if (msg.type === 'assistant') {
       const blocks = msg.message?.content;
       if (Array.isArray(blocks)) {
-        for (const block of blocks) {
+        // Use the raw content-array index (not a running count) so text/thinking
+        // ids match the streaming path in useStreamProcessor (`uuid_text_N` /
+        // `uuid_thinking_N`). Same array, same index -> same id -> addMessage
+        // de-dup catches re-delivered messages regardless of load vs stream.
+        for (let blockIdx = 0; blockIdx < blocks.length; blockIdx++) {
+          const block = blocks[blockIdx];
           if (block.type === 'text') {
             if (isSystemText(block.text || '')) continue;
             messages.push({
-              id: msg.uuid || generateMessageId(),
+              id: msg.uuid ? `${msg.uuid}_text_${blockIdx}` : generateMessageId(),
               role: 'assistant',
               type: 'text',
               content: block.text,
@@ -209,7 +214,7 @@ export function parseSessionMessages(rawMessages: any[]): LoadedSession {
             }
           } else if (block.type === 'thinking') {
             messages.push({
-              id: msg.uuid ? `${msg.uuid}_thinking_${messages.length}` : generateMessageId(),
+              id: msg.uuid ? `${msg.uuid}_thinking_${blockIdx}` : generateMessageId(),
               role: 'assistant',
               type: 'thinking',
               content: block.thinking || '',

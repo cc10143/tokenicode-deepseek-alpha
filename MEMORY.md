@@ -217,3 +217,15 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：cargo check + release 构建通过（3 warning 均为既有 dead_code），exe 覆盖便携版 `D:\TOKENICODE\tokenicode-deepseek-alpha.exe`。真实 CLI 交互（长历史会话回合后停顿 >10s 不再重放）需实际使用确认。
 
 **issue**：[#10](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/10)
+
+## 2026-08-09 assistant 消息 id 对齐（issue #9 配套项）
+
+**问题**：assistant 消息 id 双格式不一致。流式（`useStreamProcessor` L1373/L1542）用 `${uuid}_text_${blockIdx}` / `${uuid}_thinking_${blockIdx}`（blockIdx = content 数组原始下标）；加载历史（`session-loader` L138/L212）text 用 `msg.uuid`、thinking 用 `${msg.uuid}_thinking_${messages.length}`。流式因 addMessage 按 id 去重 + 同回合多 text block 必须区分，设计了 block 级下标；加载历史直接 append 不经过 addMessage，就用了裸 uuid/运行计数——**没对齐**。加载产出的 id 后续被流式/看门狗消费时去重被绕过（#10 放大因素，根因已修，id 不一致本身仍是隐患）。
+
+**修复**（`session-loader.ts`，commit 待提交）：assistant 循环 `for..of` → `for (let blockIdx...)`；text id → `${msg.uuid}_text_${blockIdx}`、thinking id → `${msg.uuid}_thinking_${blockIdx}`。blockIdx 用**原始下标**（被 continue 跳过的 tool_use/system text 仍占位），与流式遍历同一 content 数组 → id 精确对齐。
+
+**契约测试**（`session-loader.test.ts`）：text block 用原始下标——tool_use 占 index 2 时第二个 text id 是 `asst-uuid-1_text_3` 而非 `_1`。把"加载与流式 id 一致"锁死。
+
+**验证**：tsc exit 0、vitest 22/22、vite build 通过、tauri build 打包 exe。
+
+**决策记录**：用户选择**最小对齐（方案 A）**而非结构化 id（方案 B：ChatMessage 加稳定 id + block 次键、addMessage 去重键改复合键）。理由：B 是面向假想需求的建模，成本高（碰 addMessage 20+ 调用点、rewind/时间线），且 CLI text block 无自身 id（只有 tool_use 有），blockIndex 漂移问题 A/B 同样存在，B 不解决根本。tool_use/question/todo 用 CLI 稳定 `block.id` 两边一致，不在此改动范围。

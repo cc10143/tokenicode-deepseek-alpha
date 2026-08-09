@@ -8,6 +8,11 @@ All notable changes to TOKENICODE will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **品牌自定义标题栏（issue #11）** — 原生 Overlay 标题栏替换为无边框（`decorations: false`）+ 前端 `TitleBar` 组件：左侧品牌标识 + 右侧最小化/最大化-还原/关闭按钮（关闭仍走现有"确认退出"对话框；最大化图标随窗口状态切换）。标题栏空白区 `data-tauri-drag-region` 可拖拽，双击最大化，边缘缩放与 Aero Snap 保持。配套布局调整：Sidebar 顶部留白 `pt-8`→`pt-3`、ChatPanel 顶栏 `h-[68px]`→`h-[48px]`（移除原 macOS 红绿灯占位）。
+- **启动白屏修复** — 窗口以 `visible: false` 启动，React 首帧渲染后前端 `getCurrentWindow().show()`；Rust 侧 6 秒兜底线程强制显示（防 JS 渲染失败导致窗口永久隐藏）。
+
 ### Fixed
 
 - **验证式 auto-compact（issue #8）** — 消费 CLI 2.1.195 的 `compact_boundary` 事件：压缩完成后立即刷新上下文占用（`contextInputTokens = post_tokens`，让 auto-compact 判据自然失效），命令卡显示 `pre → post tokens (-X%)`。auto-compact 从一次性 flag 改为验证式 + 重试（60s 未确认自动重试，最多 3 次，耗尽标失败）。手动 `/compact` 不再由 `result` 抢先标完成——延迟 3s 等 `compact_boundary` 优先，超时读会话 JSONL 校正 Ctx + result 文本兜底标完成，避免命令卡永久 running。

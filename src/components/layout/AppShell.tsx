@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
+import { TitleBar } from './TitleBar';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFileStore } from '../../stores/fileStore';
 import { FilePreview } from '../files/FilePreview';
@@ -205,13 +206,11 @@ export function AppShell({ sidebar, main, secondary }: AppShellProps) {
   const showFloatingSecondary = secondaryPanelOpen && isFilePreviewMode;
 
   return (
-    <div className="flex h-full w-full overflow-hidden gradient-bg">
-      {/* Drag region — data-tauri-drag-region handles both drag and double-click-to-maximize natively */}
-      <div
-        data-tauri-drag-region
-        className="fixed top-0 left-0 right-0 h-[28px] z-50"
-      />
+    <div className="flex flex-col h-full w-full overflow-hidden gradient-bg">
+      <TitleBar />
 
+      {/* Content row — all panels below the custom title bar */}
+      <div className="flex flex-1 min-h-0">
       {/* Sidebar — animates to w-0 when hidden or preview mode */}
       <div
         className="flex-shrink-0 transition-all duration-300 ease-out overflow-hidden"
@@ -325,6 +324,7 @@ export function AppShell({ sidebar, main, secondary }: AppShellProps) {
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }

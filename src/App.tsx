@@ -158,6 +158,14 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Show the window once React has rendered the first frame.
+  // Window starts hidden (`visible: false` in tauri.conf.json) to avoid a white flash.
+  useEffect(() => {
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      getCurrentWindow().show();
+    });
+  }, []);
+
   // Confirm before closing the window (red X / Cmd+Q)
   const closePendingRef = useRef(false);
   const tRef = useRef(t);

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex as TokioMutex;
@@ -8863,6 +8863,22 @@ pub fn run() {
 
             #[cfg(not(desktop))]
             let _ = app;
+
+            // Fallback: force the window visible after 6s even if the frontend
+            // never calls show() (e.g. JS render failure), so the app never stays hidden.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(6));
+                    let h = handle.clone();
+                    let h2 = h.clone();
+                    let _ = h.run_on_main_thread(move || {
+                        if let Some(w) = h2.get_webview_window("main") {
+                            let _ = w.show();
+                        }
+                    });
+                });
+            }
 
             Ok(())
         })

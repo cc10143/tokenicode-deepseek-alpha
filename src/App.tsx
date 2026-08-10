@@ -8,6 +8,7 @@ import { SettingsPanel } from './components/settings/SettingsPanel';
 import { ImageLightbox } from './components/shared/ImageLightbox';
 import { ChangelogModal } from './components/shared/ChangelogModal';
 import { Toast } from './components/shared/Toast';
+import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { useSettingsStore } from './stores/settingsStore';
 import { useProviderStore } from './stores/providerStore';
 import type { ColorTheme, FontFamily, Theme } from './stores/settingsStore';
@@ -166,38 +167,42 @@ function App() {
     });
   }, []);
 
-  // Confirm before closing the window (red X / Cmd+Q)
+  // Confirm before closing the window (red X / Cmd+Q) — brand-styled dialog.
+  // Reuses ConfirmDialog (danger variant) so colors follow the GUI theme:
+  // theme classes live on <html> and the portal inherits the CSS variables.
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  // Guards re-entry: while the dialog is open or exit is in flight, further
+  // close requests are swallowed (the exit-triggered close would otherwise
+  // re-open the dialog / re-run the confirm flow).
   const closePendingRef = useRef(false);
-  const tRef = useRef(t);
-  tRef.current = t;
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       const win = getCurrentWindow();
-      win.onCloseRequested(async (event) => {
-        if (closePendingRef.current) { event.preventDefault(); return; }
+      win.onCloseRequested((event) => {
         event.preventDefault();
+        if (closePendingRef.current) return;
         closePendingRef.current = true;
-        try {
-          const { ask } = await import('@tauri-apps/plugin-dialog');
-          const confirmed = await ask(tRef.current('confirm.exit'), {
-            title: APP_NAME,
-            kind: 'warning',
-            okLabel: tRef.current('common.confirm'),
-            cancelLabel: tRef.current('common.cancel'),
-          });
-          if (confirmed) {
-            const { exit } = await import('@tauri-apps/plugin-process');
-            await exit(0);
-          }
-        } finally {
-          closePendingRef.current = false;
-        }
+        setShowExitConfirm(true);
       }).then((fn) => { unlisten = fn; });
     });
     return () => { unlisten?.(); };
   }, []);
+
+  const cancelExitConfirm = () => {
+    closePendingRef.current = false;
+    setShowExitConfirm(false);
+  };
+
+  const confirmExit = async () => {
+    try {
+      const { exit } = await import('@tauri-apps/plugin-process');
+      await exit(0);
+    } finally {
+      closePendingRef.current = false;
+    }
+  };
 
   // TK-329: On app startup (incl. browser F5 refresh), handle active backend processes.
   // - Processes WITH stdinToTab mapping: re-register event listeners and restore streaming state
@@ -726,6 +731,18 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+      {showExitConfirm && (
+        <ConfirmDialog
+          open={true}
+          title={APP_NAME}
+          message={t('confirm.exit')}
+          variant="danger"
+          confirmLabel={t('common.confirm')}
+          cancelLabel={t('common.cancel')}
+          onConfirm={confirmExit}
+          onCancel={cancelExitConfirm}
+        />
       )}
       <Toast />
     </>

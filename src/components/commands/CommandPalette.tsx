@@ -17,7 +17,9 @@ interface CommandItem {
 
 export function CommandPalette() {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const open = useSettingsStore((s) => s.commandPaletteOpen);
+  const setCommandPaletteOpen = useSettingsStore((s) => s.setCommandPaletteOpen);
+  const toggleCommandPalette = useSettingsStore((s) => s.toggleCommandPalette);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,20 +89,19 @@ export function CommandPalette() {
     );
   }, [commands, query, t]);
 
-  // Keyboard shortcut to open
+  // Keyboard shortcut to open. Esc is handled globally in App (issue #19) — the
+  // palette must not close itself on Esc, or it would race the global
+  // Esc-interrupt handler (this window listener mounts before App's).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setOpen((prev) => !prev);
-      }
-      if (e.key === 'Escape') {
-        setOpen(false);
+        toggleCommandPalette();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [toggleCommandPalette]);
 
   // Focus input when opened
   useEffect(() => {
@@ -126,7 +127,7 @@ export function CommandPalette() {
     } else if (e.key === 'Enter' && filtered[selectedIndex]) {
       e.preventDefault();
       filtered[selectedIndex].action();
-      setOpen(false);
+      setCommandPaletteOpen(false);
     }
   }, [filtered, selectedIndex]);
 
@@ -134,7 +135,7 @@ export function CommandPalette() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]"
-      onClick={() => setOpen(false)}>
+      onClick={() => setCommandPaletteOpen(false)}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
@@ -178,7 +179,7 @@ export function CommandPalette() {
             filtered.map((cmd, i) => (
               <button
                 key={cmd.id}
-                onClick={() => { cmd.action(); setOpen(false); }}
+                onClick={() => { cmd.action(); setCommandPaletteOpen(false); }}
                 className={`w-full flex items-center gap-3 px-4 py-2.5
                   text-left transition-smooth
                   ${i === selectedIndex

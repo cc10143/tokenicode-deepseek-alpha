@@ -727,7 +727,12 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
       }
       case 'result': {
         commitPartialText(tabId, msg.__stdinId);
-        store.setSessionStatus(tabId, msg.subtype === 'success' ? 'completed' : 'error');
+        // Interrupted turns (issue #19) surface as a non-success result — treat
+        // them as a clean stop while interruptAt is set, then clear it.
+        const resultMeta = store.getTab(tabId)?.sessionMeta;
+        const wasInterrupted = resultMeta?.interruptAt !== undefined;
+        if (wasInterrupted) store.setSessionMeta(tabId, { interruptAt: undefined });
+        store.setSessionStatus(tabId, wasInterrupted || msg.subtype === 'success' ? 'completed' : 'error');
         {
           const bgTab = store.getTab(tabId);
           const prevMeta = bgTab?.sessionMeta;
@@ -2079,8 +2084,13 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
           }
         }
 
+        // Interrupted turns (issue #19) surface as a non-success result — treat
+        // them as a clean stop while interruptAt is set, then clear it.
+        const bgInterruptMeta = useChatStore.getState().getTab(tabId)?.sessionMeta;
+        const bgWasInterrupted = bgInterruptMeta?.interruptAt !== undefined;
+        if (bgWasInterrupted) useChatStore.getState().setSessionMeta(tabId, { interruptAt: undefined });
         setSessionStatus(
-          msg.subtype === 'success' ? 'completed' : 'error'
+          bgWasInterrupted || msg.subtype === 'success' ? 'completed' : 'error'
         );
         {
           // Correct cumulative totals for any drift between streaming
@@ -2110,7 +2120,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
           if (resultMeta) _persistTokenState(tabId, resultMeta);
         }
         agentActions.completeAll(
-          msg.subtype === 'success' ? 'completed' : 'error'
+          bgWasInterrupted || msg.subtype === 'success' ? 'completed' : 'error'
         );
         useSessionStore.getState().fetchSessions();
         setTimeout(() => useSessionStore.getState().fetchSessions(), 1000);

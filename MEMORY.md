@@ -316,6 +316,22 @@ forked from mistydew/tokenicode-deepseek-alpha。
 
 **验证**：tsc 干净、vitest 22/22、vite build 通过、cargo check 通过（3 个既有 dead_code warning）。
 
+## 2026-08-11 Esc / 停止按钮 interrupt 打断（issue #19）
+
+**背景**：终端 `Esc` 打断是优雅停止（interrupt），fork 无 TTY 需走 SDK 控制协议。此前停止按钮是 `killSession`（杀进程、丢上下文）；interrupt 协议链路已就绪但前端 0 调用点。用户选方案 C（按钮 + Esc 双入口）。
+
+**改动**：
+- `src/lib/interrupt.ts`（新建）`interruptCurrentTurn()`：设 `sessionMeta.interruptAt` + 置 completed + `interruptSession`（保留 stdinId）+ 3s 兜底 kill。双入口共用（停止按钮 / App 全局 Esc）
+- `useStreamProcessor` 两处 result handler：读 `interruptAt`，置位则按 completed（CLI 打断回合 result subtype 非 success，否则显示错误态）+ 清除
+- `CommandPalette.open` 提升到 `settingsStore.commandPaletteOpen`，**移除自身 Esc 关闭**（window 监听先于 App 触发 → 关掉后 App 读到已关 → 误打断）；App 全局 Esc handler 统一关 + 打断
+- `InputBar`：停止按钮换 `interruptCurrentTurn()`；斜杠浮层 Esc 加 `stopPropagation()`（关浮层不打断）；`/hotkey` 加 Esc 条目
+
+**新回合竞态**（关键设计）：interrupt 后用户发 follow-up，send 路径更新 `turnStartTime`。3s 兜底只在 `interruptAt >= turnStartTime`（无新回合）时 kill；重入守卫用同比较，允许对新回合重新打断。
+
+**验证**：tsc 干净、vitest 22/22、vite build 通过（无 Rust 改动）。真实打断行为需实际使用确认。
+
+**issue**：[#19](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/19)
+
 ## 2026-08-10 compact 确认链路根治（issue #18）
 
 **背景**：40e3254c 会话（`claude-opus-4-8[1M]`，4 小时长会话）内 `/compact` 卡「正在执行」永久不完成，命令卡显示 `Auto-compact failed after 3 attempts` / `Error during compaction: summarization produced empty response` / `Not enough messages to compact.`。自动压缩很多次第一次遇见，一旦发生会话卡死。

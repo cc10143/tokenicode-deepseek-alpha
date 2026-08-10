@@ -157,6 +157,9 @@ interface SettingsState {
   agentPanelOpen: boolean;
   /** Whether the floating task panel is open (issue #16) */
   taskPanelOpen: boolean;
+  /** Whether the command palette is open (issue #19 — lifted from internal state so the
+   *  global Esc-interrupt handler can coordinate with it) */
+  commandPaletteOpen: boolean;
 
   /** Effective model read from ~/.claude/settings.json in inherit mode (transient, not persisted) */
   inheritedModel: string | null;
@@ -169,6 +172,8 @@ interface SettingsState {
   toggleSecondaryPanel: () => void;
   toggleAgentPanel: () => void;
   toggleTaskPanel: () => void;
+  setCommandPaletteOpen: (open: boolean) => void;
+  toggleCommandPalette: () => void;
   setSecondaryTab: (tab: SecondaryPanelTab) => void;
   setSecondaryPanelWidth: (width: number) => void;
   toggleSettings: () => void;
@@ -235,6 +240,7 @@ export const useSettingsStore = create<SettingsState>()(
       settingsOpen: false,
       agentPanelOpen: false,
       taskPanelOpen: false,
+      commandPaletteOpen: false,
       inheritedModel: null,
       modelMappings: null,
       inheritedActiveTier: null,
@@ -293,6 +299,12 @@ export const useSettingsStore = create<SettingsState>()(
 
       toggleTaskPanel: () =>
         set((state) => ({ taskPanelOpen: !state.taskPanelOpen })),
+
+      setCommandPaletteOpen: (open) =>
+        set(() => ({ commandPaletteOpen: open })),
+
+      toggleCommandPalette: () =>
+        set((state) => ({ commandPaletteOpen: !state.commandPaletteOpen })),
 
       setSecondaryTab: (tab) =>
         set(() => ({

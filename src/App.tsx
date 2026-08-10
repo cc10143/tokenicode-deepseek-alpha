@@ -19,6 +19,7 @@ import { APP_NAME } from './lib/edition';
 import { useAgentStore } from './stores/agentStore';
 import { useTaskStore } from './stores/taskStore';
 import { bridge, onClaudeStream, onFileChange, onSessionExit } from './lib/tauri-bridge';
+import { interruptCurrentTurn } from './lib/interrupt';
 import { useScrollZoom } from './lib/useScrollZoom';
 import { useT } from './lib/i18n';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -639,6 +640,28 @@ function App() {
         if (!stdinId) return;
         runningIds.forEach((id) => { bridge.stopTask(stdinId, id).catch(() => {}); });
       }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Esc: interrupt the running turn (issue #19). Overlay priority — close the
+  // command palette ourselves (it has no Esc handler of its own anymore, and its
+  // window listener mounts before this one, so letting it self-close would race
+  // and interrupt underneath); never interrupt while another floating panel is open.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Skip IME composition cancel (e.g. Chinese pinyin) and events a child
+      // handler already consumed via preventDefault.
+      if (e.isComposing || e.defaultPrevented) return;
+      const s = useSettingsStore.getState();
+      if (s.commandPaletteOpen) {
+        s.setCommandPaletteOpen(false);
+        return;
+      }
+      if (s.taskPanelOpen || s.agentPanelOpen || s.settingsOpen) return;
+      interruptCurrentTurn();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

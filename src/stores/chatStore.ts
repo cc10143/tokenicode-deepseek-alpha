@@ -98,6 +98,15 @@ export interface SessionMeta {
    * compact 确认到达时批量标完成。
    */
   pendingCompactCmdIds?: string[];
+  /**
+   * Timestamp of the in-flight graceful interrupt (issue #19), set by
+   * interruptCurrentTurn() before sending the SDK `interrupt` control_request.
+   * The CLI emits a `result` with a non-success subtype for an interrupted turn —
+   * useStreamProcessor treats it as a clean stop while this is set, then clears it.
+   * Guarded against the new-turn race: the 3s kill fallback only fires when
+   * interruptAt >= turnStartTime (i.e. no follow-up started a new turn since).
+   */
+  interruptAt?: number;
   /** Accumulated input tokens from stream events (message_start) — per turn, reset each turn */
   inputTokens?: number;
   /** Accumulated output tokens from stream events (message_delta) — per turn, reset each turn */

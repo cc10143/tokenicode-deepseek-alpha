@@ -9,6 +9,7 @@ import {
   type ThinkingLevel,
 } from '../../stores/settingsStore';
 import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr, onSessionExit, onPermissionRequest, type UnifiedCommand, type PermissionRequest } from '../../lib/tauri-bridge';
+import { interruptCurrentTurn } from '../../lib/interrupt';
 import { ModelSelector } from './ModelSelector';
 import { ModeSelector } from './ModeSelector';
 import { FileUploadChips } from './FileUploadChips';
@@ -595,6 +596,7 @@ export function InputBar() {
                 { keys: 'Ctrl+Tab', desc: t('cmd.hotkeyRecentSession') },
                 { keys: 'Ctrl + = / - / 0', desc: t('cmd.hotkeyZoom') },
                 { keys: 'Ctrl / Cmd + Scroll', desc: t('cmd.hotkeyZoomWheel') },
+                { keys: 'Esc', desc: t('cmd.hotkeyInterrupt') },
               ],
             },
             {
@@ -1421,6 +1423,7 @@ export function InputBar() {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation(); // close popover only — don't let the global Esc-interrupt handler fire (issue #19)
         setSlashVisible(false);
         return true;
       }
@@ -1624,31 +1627,11 @@ export function InputBar() {
               {t(ctrlEnterToSend ? 'input.shortcutHintCtrlEnter' : 'input.shortcutHint')}
             </span>
           )}
-          {/* Stop button — visible only while running */}
+          {/* Stop button — visible only while running. Graceful interrupt (issue #19):
+              keeps the CLI process alive so a follow-up preserves context. */}
           {isRunning && (
             <button
-              onClick={async () => {
-                const stopTabId = useSessionStore.getState().selectedSessionId;
-                const sid = getActiveTabState().sessionMeta.stdinId;
-                // Immediately clear stdinId so no further messages are sent to the dead process
-                if (stopTabId) {
-                  useChatStore.getState().setSessionMeta(stopTabId, { stdinId: undefined });
-                  useChatStore.getState().setSessionStatus(stopTabId, 'completed');
-                  useChatStore.getState().setActivityStatus(stopTabId, { phase: 'completed' });
-                }
-                if (sid) {
-                  await bridge.killSession(sid).catch(() => {});
-                  // Don't unlisten immediately — let process_exit fire naturally to clean up.
-                  // The listener will be replaced when a new session spawns (line ~788).
-                  // As a safety net, force-clean after 3s if process_exit hasn't arrived.
-                  setTimeout(() => {
-                    if ((window as any).__claudeUnlisteners?.[sid]) {
-                      (window as any).__claudeUnlisteners[sid]();
-                      delete (window as any).__claudeUnlisteners[sid];
-                    }
-                  }, 3000);
-                }
-              }}
+              onClick={() => { interruptCurrentTurn(); }}
               className="flex-shrink-0 self-end w-8 h-8 rounded-[10px]
                 bg-red-500/15 text-red-500
                 flex items-center justify-center

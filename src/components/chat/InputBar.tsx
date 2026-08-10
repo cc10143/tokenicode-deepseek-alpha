@@ -17,6 +17,7 @@ import { useFileAttachments } from '../../hooks/useFileAttachments';
 import { useRewind } from '../../hooks/useRewind';
 import { useStreamProcessor, flushStreamBuffer } from '../../hooks/useStreamProcessor';
 import { useAgentStore } from '../../stores/agentStore';
+import { useTaskStore } from '../../stores/taskStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useT } from '../../lib/i18n';
 import { SlashCommandPopover, getFilteredCommandList } from './SlashCommandPopover';
@@ -867,6 +868,7 @@ export function InputBar() {
     // Initialize agent tracking — clear previous turn's agents (they may be from a
     // different project/session) and create a fresh main agent for this turn.
     useAgentStore.getState().clearAgents();
+    useTaskStore.getState().clearAll();
     useAgentStore.getState().upsertAgent({
       id: 'main',
       parentId: null,

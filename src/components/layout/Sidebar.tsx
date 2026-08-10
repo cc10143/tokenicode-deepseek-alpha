@@ -6,6 +6,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { ConversationList } from '../conversations/ConversationList';
 import { useT } from '../../lib/i18n';
 import { useAgentStore } from '../../stores/agentStore';
+import { useTaskStore } from '../../stores/taskStore';
 import { IS_ALPHA } from '../../lib/edition';
 import { resolveModelForProvider, resolveModelDisplay } from '../../lib/api-provider';
 import { ProfileStatsModal } from '../profile/ProfileStatsModal';
@@ -36,6 +37,7 @@ export function Sidebar() {
     if (currentTabId) {
       useChatStore.getState().saveToCache(currentTabId);
       useAgentStore.getState().saveToCache(currentTabId);
+      useTaskStore.getState().saveToCache(currentTabId);
     }
 
     const newDraftId = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

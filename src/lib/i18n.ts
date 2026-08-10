@@ -341,6 +341,22 @@ const messages: Record<Locale, Record<string, string>> = {
     'agents.completed': '已完成',
     'agents.error': '出错',
 
+    // Task panel (issue #16)
+    'tasks.title': '任务',
+    'tasks.running': '运行中',
+    'tasks.background': '后台任务',
+    'tasks.completed': '已完成',
+    'tasks.failed': '失败',
+    'tasks.stopped': '已停止',
+    'tasks.empty': '运行中的任务会显示在这里',
+    'tasks.stop': '停止',
+    'tasks.stopAll': '停止全部',
+    'tasks.active': '运行',
+    'tasks.clearCompleted': '清除已完成',
+    'tasks.subagent': '子任务',
+    'tasks.backgroundTask': '后台任务',
+    'tasks.toggle': '任务',
+
     // WelcomeScreen
     'welcome.newChat': '选择文件夹',
     'welcome.subtitle': '选择一个项目文件夹以开始',
@@ -1080,6 +1096,22 @@ const messages: Record<Locale, Record<string, string>> = {
     'agents.runningTool': 'Running tool',
     'agents.completed': 'Completed',
     'agents.error': 'Error',
+
+    // Task panel (issue #16)
+    'tasks.title': 'Tasks',
+    'tasks.running': 'Running',
+    'tasks.background': 'Background',
+    'tasks.completed': 'Completed',
+    'tasks.failed': 'Failed',
+    'tasks.stopped': 'Stopped',
+    'tasks.empty': 'Running tasks will appear here',
+    'tasks.stop': 'Stop',
+    'tasks.stopAll': 'Stop all',
+    'tasks.active': 'running',
+    'tasks.clearCompleted': 'Clear completed',
+    'tasks.subagent': 'Sub-task',
+    'tasks.backgroundTask': 'Background',
+    'tasks.toggle': 'Tasks',
 
     // WelcomeScreen
     'welcome.newChat': 'Select Folder',

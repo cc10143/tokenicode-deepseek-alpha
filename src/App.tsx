@@ -17,6 +17,7 @@ import { useChatStore } from './stores/chatStore';
 import { useSessionStore } from './stores/sessionStore';
 import { APP_NAME } from './lib/edition';
 import { useAgentStore } from './stores/agentStore';
+import { useTaskStore } from './stores/taskStore';
 import { bridge, onClaudeStream, onFileChange, onSessionExit } from './lib/tauri-bridge';
 import { useScrollZoom } from './lib/useScrollZoom';
 import { useT } from './lib/i18n';
@@ -283,6 +284,7 @@ function App() {
         // Also save to agentCache so that handleLoadSession's restoreFromCache
         // doesn't wipe the agents (restoreFromCache clears agents on cache miss).
         agentState.clearAgents();
+        useTaskStore.getState().clearAll();
         agentState.upsertAgent({
           id: 'main',
           parentId: null,
@@ -292,6 +294,7 @@ function App() {
           isMain: true,
         });
         agentState.saveToCache(tabId);
+        useTaskStore.getState().saveToCache(tabId);
 
         // Skip if listeners already exist (e.g. InputBar already set them up)
         if ((window as any).__claudeUnlisteners?.[stdinId]) continue;
@@ -569,6 +572,7 @@ function App() {
         if (selectedSessionId) {
           useChatStore.getState().saveToCache(selectedSessionId);
           useAgentStore.getState().saveToCache(selectedSessionId);
+          useTaskStore.getState().saveToCache(selectedSessionId);
         }
 
         // Close file preview
@@ -581,6 +585,7 @@ function App() {
         const restored = useChatStore.getState().restoreFromCache(previousSessionId);
         if (restored) {
           useAgentStore.getState().restoreFromCache(previousSessionId);
+          useTaskStore.getState().restoreFromCache(previousSessionId);
           // Restore working directory
           const projectPath = prevSession.project || prevSession.projectDir;
           if (projectPath) {
@@ -599,6 +604,40 @@ function App() {
             useSettingsStore.getState().setWorkingDirectory(resolved);
           }
         }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Ctrl+T: toggle task panel; Ctrl+X Ctrl+K: stop all running tasks (issue #16)
+  useEffect(() => {
+    let ctrlXAt = 0;
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 't') {
+        e.preventDefault();
+        useSettingsStore.getState().toggleTaskPanel();
+        return;
+      }
+      if (key === 'x') {
+        // Don't preventDefault — let Ctrl+X (cut) behave normally. Only remember
+        // the timestamp so a fast follow-up Ctrl+K triggers stop-all.
+        ctrlXAt = Date.now();
+        return;
+      }
+      if (key === 'k' && Date.now() - ctrlXAt < 1500) {
+        e.preventDefault();
+        ctrlXAt = 0;
+        const runningIds = useTaskStore.getState().getRunningIds();
+        if (runningIds.length === 0) return;
+        const tabId = useSessionStore.getState().selectedSessionId;
+        const stdinId = tabId
+          ? useChatStore.getState().getTab(tabId)?.sessionMeta.stdinId
+          : undefined;
+        if (!stdinId) return;
+        runningIds.forEach((id) => { bridge.stopTask(stdinId, id).catch(() => {}); });
       }
     };
     window.addEventListener('keydown', handler);

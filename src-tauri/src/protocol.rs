@@ -91,6 +91,8 @@ pub enum SdkControlRequestPayload {
     },
     #[serde(rename = "rewind_files")]
     RewindFiles { user_message_id: String },
+    #[serde(rename = "stop_task")]
+    StopTask { task_id: String },
 }
 
 impl ControlRequest {
@@ -131,6 +133,14 @@ impl ControlRequest {
             r#type: "control_request",
             request_id: Self::random_id(),
             request: SdkControlRequestPayload::RewindFiles { user_message_id },
+        }
+    }
+
+    pub fn stop_task(task_id: String) -> Self {
+        Self {
+            r#type: "control_request",
+            request_id: Self::random_id(),
+            request: SdkControlRequestPayload::StopTask { task_id },
         }
     }
 }
@@ -204,5 +214,14 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains(r#""subtype":"set_permission_mode""#));
         assert!(json.contains(r#""mode":"acceptEdits""#));
+    }
+
+    #[test]
+    fn test_serialize_stop_task() {
+        let req = ControlRequest::stop_task("a7e27eaf6c3bc2658".to_string());
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains(r#""type":"control_request""#));
+        assert!(json.contains(r#""subtype":"stop_task""#));
+        assert!(json.contains(r#""task_id":"a7e27eaf6c3bc2658""#));
     }
 }

@@ -155,6 +155,8 @@ interface SettingsState {
   setBackgroundTheme: (backgroundTheme: BackgroundTheme) => void;
   /** Whether the floating agent panel is open */
   agentPanelOpen: boolean;
+  /** Whether the floating task panel is open (issue #16) */
+  taskPanelOpen: boolean;
 
   /** Effective model read from ~/.claude/settings.json in inherit mode (transient, not persisted) */
   inheritedModel: string | null;
@@ -166,6 +168,7 @@ interface SettingsState {
   toggleSidebar: () => void;
   toggleSecondaryPanel: () => void;
   toggleAgentPanel: () => void;
+  toggleTaskPanel: () => void;
   setSecondaryTab: (tab: SecondaryPanelTab) => void;
   setSecondaryPanelWidth: (width: number) => void;
   toggleSettings: () => void;
@@ -231,6 +234,7 @@ export const useSettingsStore = create<SettingsState>()(
       secondaryPanelWidth: 300,
       settingsOpen: false,
       agentPanelOpen: false,
+      taskPanelOpen: false,
       inheritedModel: null,
       modelMappings: null,
       inheritedActiveTier: null,
@@ -286,6 +290,9 @@ export const useSettingsStore = create<SettingsState>()(
 
       toggleAgentPanel: () =>
         set((state) => ({ agentPanelOpen: !state.agentPanelOpen })),
+
+      toggleTaskPanel: () =>
+        set((state) => ({ taskPanelOpen: !state.taskPanelOpen })),
 
       setSecondaryTab: (tab) =>
         set(() => ({

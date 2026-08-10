@@ -2549,6 +2549,14 @@ async fn send_control_request(
                 .to_string();
             ControlRequest::rewind_files(user_message_id)
         }
+        "stop_task" => {
+            let task_id = payload
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing 'task_id' in payload")?
+                .to_string();
+            ControlRequest::stop_task(task_id)
+        }
         other => return Err(format!("Unknown control request subtype: {}", other)),
     };
     let json_str = serde_json::to_string(&req)

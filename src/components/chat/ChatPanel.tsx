@@ -16,7 +16,9 @@ import { getContextUsedTokens } from '../../lib/context-usage';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useFileStore } from '../../stores/fileStore';
 import { useAgentStore } from '../../stores/agentStore';
+import { useTaskStore } from '../../stores/taskStore';
 import { AgentPanel } from '../agents/AgentPanel';
+import { TaskPanel } from '../tasks/TaskPanel';
 import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../../lib/tauri-bridge';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useT } from '../../lib/i18n';
@@ -485,6 +487,18 @@ export function ChatPanel() {
   );
   const totalAgentCount = agents.size;
 
+  // Task activity for task panel badge (issue #16)
+  const taskPanelOpen = useSettingsStore((s) => s.taskPanelOpen);
+  const toggleTaskPanel = useSettingsStore((s) => s.toggleTaskPanel);
+  const taskMap = useTaskStore((s) => s.tasks);
+  const activeTaskCount = useMemo(
+    () => Array.from(taskMap.values()).filter(
+      (task) => task.status === 'running' || task.status === 'pending'
+    ).length,
+    [taskMap],
+  );
+  const totalTaskCount = taskMap.size;
+
   const showPlanPanel = usePlanPanelStore((s) => s.open);
   const closePlanPanel = usePlanPanelStore((s) => s.close);
 
@@ -707,6 +721,23 @@ export function ChatPanel() {
             </span>
           </button>
 
+          {/* Task status — clickable dot + label → opens TaskPanel (issue #16) */}
+          <button onClick={toggleTaskPanel}
+            className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded-lg
+              transition-smooth text-[9px]
+              ${taskPanelOpen ? 'bg-accent/10' : 'hover:bg-bg-secondary/50'}`}
+            title={t('tasks.toggle')}>
+            <span className={`w-[6px] h-[6px] rounded-full flex-shrink-0 transition-smooth
+              ${activeTaskCount > 0
+                ? 'bg-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.5)] animate-pulse-soft'
+                : totalTaskCount > 0
+                  ? 'bg-success'
+                  : 'bg-text-tertiary/30'}`} />
+            <span className={`${activeTaskCount > 0 ? 'text-amber-400' : totalTaskCount > 0 ? 'text-success' : 'text-text-tertiary'}`}>
+              {t('tasks.toggle')}{totalTaskCount > 0 ? ` (${totalTaskCount})` : ''}
+            </span>
+          </button>
+
           {/* API route status — dot + label */}
           <div className="flex items-center gap-1.5 text-[9px]">
             <span className={`w-[6px] h-[6px] rounded-full flex-shrink-0 transition-smooth
@@ -736,6 +767,18 @@ export function ChatPanel() {
                 w-72 max-h-80 rounded-xl border border-border-subtle
                 bg-bg-primary shadow-lg overflow-y-auto">
                 <AgentPanel />
+              </div>
+            </>
+          )}
+
+          {/* Floating task panel popover — anchored to task button (issue #16) */}
+          {taskPanelOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={toggleTaskPanel} />
+              <div className="absolute left-0 top-full mt-2 z-50
+                w-80 max-h-80 rounded-xl border border-border-subtle
+                bg-bg-primary shadow-lg overflow-y-auto">
+                <TaskPanel />
               </div>
             </>
           )}

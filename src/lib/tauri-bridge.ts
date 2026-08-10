@@ -655,6 +655,10 @@ export const bridge = {
   /** Send a runtime interrupt command */
   interruptSession: (sessionId: string) =>
     invoke<void>('send_control_request', { sessionId, subtype: 'interrupt', payload: {} }),
+
+  /** Stop a running background task / subagent by its task_id (issue #16) */
+  stopTask: (sessionId: string, taskId: string) =>
+    invoke<void>('send_control_request', { sessionId, subtype: 'stop_task', payload: { task_id: taskId } }),
 };
 
 // --- SDK Control Protocol Types ---

@@ -285,3 +285,23 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：rect==client 1600x1000（9px 黑框消失、窗口回配置尺寸）；圆角 4 角透桌面；最大化 client 2560x1390 + 4 角圆角归零填应用背景；ConfirmDialog 遮罩 + 居中正常不溢出圆角。用户目视确认效果 OK。
 
 **issue**：[#14](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/14)
+
+## 2026-08-10 任务系统（issue #16，CLI 快捷键 P0）
+
+**背景**：CLI 快捷键调研（issue #15）确认任务清单/后台任务/subagent 全部通过 stream-json `system` 消息 `task_started / task_progress / task_updated / task_notification` 推送（实测 deepseek 中转真实触发）。fork 之前未消费（task_* 当 unhandled 丢弃）。
+
+**改动**（14 文件，Rust 只加一个 control subtype）：
+- 新增 `taskStore.ts`（`Map<task_id, TaskState>` + per-tab cache，随 agentStore 在 6 个切换点同步）+ `TaskPanel.tsx`（仿 AgentPanel 浮层：运行中 subagent / 后台任务分组 / 停止 / 停止全部 / 清除已完成）
+- `protocol.rs` + `lib.rs` + `tauri-bridge.ts`：补 `stop_task` control_request
+- `useStreamProcessor`：`handleTaskSystemMessage` 消费 4 个 task_*（foreground `handleStreamMessage` + background `handleBackgroundStreamMessage` 的 system 分支都接入）
+- 快捷键：`Ctrl+T` 开关任务面板（settingsStore.taskPanelOpen）；`Ctrl+X Ctrl+K` 停全部 running（Ctrl+X 只记时间戳不拦截，保留输入框 cut，1.5s 内 Ctrl+K 触发）；`Ctrl+B` 未实现（无 TTY 无法前台转后台，且与 tiptap 加粗冲突）
+- ChatPanel 顶栏任务按钮（运行中计数圆点）+ 浮层 popover
+
+**验证**：tsc 干净、vitest 22/22、vite build 通过、cargo check 通过、protocol 序列化测试 4/4（新增 `test_serialize_stop_task`）。cargo test 全量 2 个失败（`decode_tests::test_hyphenated_dir`/`test_space_in_dir_name`）为**既有问题**——git stash 验证与本次改动无关（路径解码 bug：`ppt-maker` 被错误解析成 `ppt/maker`，`jd 设计` 变 `jd/设计`）。
+
+**协议事实**（写进 memory，调研源自 issue #15）：
+- task_* 是 `system` 消息，字段含 `task_id`/`tool_use_id`/`description`/`subagent_type`/`task_type`（local_agent = subagent，local_bash = 后台 bash）/`patch.status`/`is_backgrounded`/`usage`
+- 控制面可发送的 control_request：interrupt、set_permission_mode、set_model、set_max_thinking_tokens、stop_task、rewind_files（SDK 0.3.226 确认，`protocol.rs` 已实现 interrupt/set_permission_mode/set_model/rewind_files/stop_task，**缺 set_max_thinking_tokens** = Alt+T 待接线）
+- **无 fast mode control 通道**（Alt+O 只能走 `/fast` 斜杠命令 send_stdin）
+
+**issue**：[#16](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/16)

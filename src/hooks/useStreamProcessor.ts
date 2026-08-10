@@ -9,6 +9,7 @@ import {
 } from '../stores/settingsStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAgentStore, resolveAgentId, getAgentDepth } from '../stores/agentStore';
+import { useTaskStore } from '../stores/taskStore';
 import { useFileStore } from '../stores/fileStore';
 import { bridge, getDefaultMcpConfigPath, onClaudeStream, onClaudeStderr } from '../lib/tauri-bridge';
 import { envFingerprint, resolveModelForProvider, resolveModelForSend, resolveThinkingLevelForProvider } from '../lib/api-provider';
@@ -44,6 +45,62 @@ export function formatErrorForUser(raw: string): string {
   const match = ERROR_CATEGORIES.find((c) => c.pattern.test(raw));
   const friendly = match ? t(match.i18nKey) : t('error.genericFallback');
   return `${friendly}\n\n<details>\n<summary>${t('error.showDetails')}</summary>\n\n\`\`\`\n${raw}\n\`\`\`\n\n</details>`;
+}
+
+// --- Task system messages (issue #16) ---
+// CLI 2.1.195 stream-json pushes `system` messages task_started / task_progress /
+// task_updated / task_notification for Task-tool subagents (local_agent) and
+// background bash (local_bash). Mirror them into the taskStore so the task panel
+// can render running/background/finished tasks and drive stop_task.
+
+export function handleTaskSystemMessage(msg: any) {
+  const taskStore = useTaskStore.getState();
+  const subtype = msg.subtype;
+
+  if (subtype === 'task_started') {
+    taskStore.upsert({
+      id: msg.task_id,
+      toolUseId: msg.tool_use_id,
+      description: msg.description || msg.prompt || 'Task',
+      subagentType: msg.subagent_type,
+      taskType: msg.task_type,
+      workflowName: msg.workflow_name,
+      prompt: msg.prompt,
+      status: 'running',
+      isBackgrounded: msg.task_type === 'local_bash',
+    });
+  } else if (subtype === 'task_progress') {
+    taskStore.upsert({
+      id: msg.task_id,
+      description: msg.description,
+      subagentType: msg.subagent_type,
+      status: 'running',
+      lastToolName: msg.last_tool_name,
+      summary: msg.summary,
+      usage: msg.usage ? {
+        totalTokens: msg.usage.total_tokens,
+        toolUses: msg.usage.tool_uses,
+        durationMs: msg.usage.duration_ms,
+      } : undefined,
+    });
+  } else if (subtype === 'task_updated') {
+    taskStore.upsert({
+      id: msg.task_id,
+      status: msg.patch?.status ?? 'running',
+      isBackgrounded: msg.patch?.is_backgrounded,
+      error: msg.patch?.error,
+    });
+  } else if (subtype === 'task_notification') {
+    taskStore.complete(msg.task_id, msg.status, {
+      summary: msg.summary,
+      outputFile: msg.output_file,
+      usage: msg.usage ? {
+        totalTokens: msg.usage.total_tokens,
+        toolUses: msg.usage.tool_uses,
+        durationMs: msg.usage.duration_ms,
+      } : undefined,
+    });
+  }
 }
 
 // --- Token state cache + Claude UUID index (survives F5 via sessionStorage) ---
@@ -844,6 +901,9 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
               store.setSessionStatus(tabId, 'idle');
             }
           }
+        } else if (msg.subtype && msg.subtype.startsWith('task_')) {
+          // Task-tool subagent / background task lifecycle (issue #16)
+          handleTaskSystemMessage(msg);
         }
         break;
     }
@@ -1314,6 +1374,9 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
           }
           compactConfirmedRef.current = true;
           compactInFlightRef.current = false;
+        } else if (msg.subtype && msg.subtype.startsWith('task_')) {
+          // Task-tool subagent / background task lifecycle (issue #16)
+          handleTaskSystemMessage(msg);
         } else {
           // FI-3: Log unknown subtypes so we know what we're missing
           console.warn('[TOKENICODE] Unhandled system subtype:', msg.subtype, msg);
@@ -1775,6 +1838,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                 });
                 setActivityStatus({ phase: 'thinking' });
                 agentActions.clearAgents();
+                useTaskStore.getState().clearAll();
                 agentActions.upsertAgent({
                   id: 'main', parentId: null,
                   description: retryText.slice(0, 100),
@@ -2139,6 +2203,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             });
             setActivityStatus({ phase: 'thinking' });
             agentActions.clearAgents();
+            useTaskStore.getState().clearAll();
             agentActions.upsertAgent({
               id: 'main',
               parentId: null,

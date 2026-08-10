@@ -4,6 +4,7 @@ import { useChatStore, generateMessageId } from '../../stores/chatStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFileStore } from '../../stores/fileStore';
 import { useAgentStore } from '../../stores/agentStore';
+import { useTaskStore } from '../../stores/taskStore';
 import { bridge, SessionListItem } from '../../lib/tauri-bridge';
 import { listen } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -365,6 +366,7 @@ export function ConversationList() {
     if (currentTabId) {
       useChatStore.getState().saveToCache(currentTabId);
       useAgentStore.getState().saveToCache(currentTabId);
+      useTaskStore.getState().saveToCache(currentTabId);
     }
 
     // Close file preview
@@ -377,6 +379,7 @@ export function ConversationList() {
     const restored = useChatStore.getState().restoreFromCache(sessionId);
     if (restored) {
       useAgentStore.getState().restoreFromCache(sessionId);
+      useTaskStore.getState().restoreFromCache(sessionId);
       if (projectOrDir) {
         useSettingsStore.getState().setWorkingDirectory(resolveProjectPath(projectOrDir));
       }
@@ -402,6 +405,7 @@ export function ConversationList() {
       useChatStore.getState().ensureTab(sessionId);
       useChatStore.getState().resetTab(sessionId);
       useAgentStore.getState().clearAgents();
+      useTaskStore.getState().clearAll();
       return;
     }
 
@@ -412,6 +416,7 @@ export function ConversationList() {
     const agentActions = useAgentStore.getState();
     clearMessages(sessionId);
     agentActions.clearAgents();
+    useTaskStore.getState().clearAll();
     setSessionStatus(sessionId, 'running');
     // TK-329: explicitly clear stdinId when loading from disk — no live process exists yet.
     // Only set the CLI UUID (for resume). Prevents inheriting a stale stdinId
@@ -563,6 +568,7 @@ export function ConversationList() {
     if (currentTabId) {
       useChatStore.getState().saveToCache(currentTabId);
       useAgentStore.getState().saveToCache(currentTabId);
+      useTaskStore.getState().saveToCache(currentTabId);
     }
     const newDraftId = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     useChatStore.getState().ensureTab(newDraftId);

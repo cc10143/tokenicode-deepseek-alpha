@@ -1,7 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { TitleBar } from './TitleBar';
-import { ResizeHandles } from './ResizeHandles';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFileStore } from '../../stores/fileStore';
 import { FilePreview } from '../files/FilePreview';
@@ -36,24 +34,6 @@ export function AppShell({ sidebar, main, secondary }: AppShellProps) {
   /* File preview state — when a file is selected, we enter "preview mode" */
   const selectedFile = useFileStore((s) => s.selectedFile);
   const isFilePreviewMode = !!selectedFile;
-
-  /* Maximized state — used to zero the rounded corners/border when the window
-     is maximized so the content hugs the screen edges. */
-  const [isMaximized, setIsMaximized] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    const refresh = () => {
-      getCurrentWindow().isMaximized().then((m) => {
-        if (mounted) setIsMaximized(m);
-      });
-    };
-    refresh();
-    const unlisten = getCurrentWindow().onResized(refresh);
-    return () => {
-      mounted = false;
-      unlisten.then((fn) => fn());
-    };
-  }, []);
 
   // --- Right-side panel dragging (secondary + preview) ---
   const isRightDragging = useRef(false);
@@ -226,9 +206,8 @@ export function AppShell({ sidebar, main, secondary }: AppShellProps) {
   const showFloatingSecondary = secondaryPanelOpen && isFilePreviewMode;
 
   return (
-    <div className={`flex flex-col h-full w-full overflow-hidden gradient-bg${isMaximized ? ' is-maximized' : ''}`}>
+    <div className="flex flex-col h-full w-full overflow-hidden gradient-bg">
       <TitleBar />
-      <ResizeHandles />
 
       {/* Content row — all panels below the custom title bar */}
       <div className="flex flex-1 min-h-0">

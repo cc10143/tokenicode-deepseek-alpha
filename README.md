@@ -37,6 +37,8 @@
 - **stdout 看门狗误触发修复**：看门狗原只看 stdout 静默 10 秒，无法区分"块缓冲卡住"和"CLI 回合完成、等待下一条输入"。长历史会话中回合完成后停顿超过 10 秒，会触发整个会话历史逐条重放。现引入 armed 门控（stdout 收到 `result` 即解除，只在 CLI 回合进行中触发）+ 基线（首次扫描跳过已有历史），看门狗只补发本次会话新增的消息，块缓冲补发能力保留。
 - **assistant 消息 id 对齐**：历史加载与实时流式的 assistant 文本/思考消息 id 统一为 `${uuid}_text_N` / `${uuid}_thinking_N`（N 为 content 数组原始下标）。此前加载历史用裸 `uuid`、流式用带下标格式，两套规则让按 id 去重被绕过；统一后任何"把 JSONL 记录补发给前端"的路径都能被去重兜住。附带契约测试锁定 id 规则。
 - **Ctx 上下文占用恢复（CLI 2.1.195 兼容）**：CLI 2.1.195 的 stream-json 输出中 `message_start` 事件 usage 全为 0，真实 usage 只在 `result`。本 fork 从 `result` 事件恢复 `contextInputTokens` 快照，并让打开历史会话（命中内存缓存）与 App 重启 reconnect 时从会话 JSONL 回填上下文占用——修复"打开历史会话 Ctx 一直显示 0%，/compact 后才正常"。
+- **品牌化自定义标题栏**：窗口改为无边框（`decorations: false`）由前端自绘 36px 标题栏（最小化 / 最大化-还原 / 关闭按钮 + 拖拽区），配色跟随 GUI 主题；启动时 `visible: false` 隐藏窗口，React 首帧后显示（Rust 侧 6s 兜底），避免无边框窗口白屏闪窗。
+- **品牌化关闭确认对话框**：窗口关闭确认由原生 MessageBox 改为复用 `ConfirmDialog`（danger 变体）——React 状态驱动渲染、portal 到 body 经 CSS 级联自动跟随 GUI 主题（浅色/深色 + accent + 背景皮肤），确认后走 `exit(0)`，带防重入 guard 不重复弹窗。
 
 ### v1.0.6
 

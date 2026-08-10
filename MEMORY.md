@@ -247,3 +247,21 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：真实 result usage 模拟 → `contextInputTokens = 44268`（非 0）✓；tsc 干净；vitest 22/22；vite build + cargo release 构建通过；便携版已覆盖。
 
 **协议事实**（写进 debug 笔记）：CLI 2.1.195 下 stream-json 输出中 `assistant` 顶层消息 usage 也是 0，`result` 才有完整 usage——**任何依赖 message_start/assistant usage 的 token 统计都会读到 0**。排查 token/上下文问题时先确认事件来源。v1.0.8 删除 result 段快照是本次回归的引入点。
+
+## 2026-08-10 品牌化关闭确认对话框（issue #12）
+
+**背景**：#11 把窗口改成 `decorations: false` 无边框 + 前端自绘 TitleBar 后，关闭确认仍是**原生 Windows MessageBox**（`plugin-dialog` 的 `ask()`），风格与新标题栏不匹配。方案 A：复用现有 `ConfirmDialog`（danger variant），配色跟随 GUI 主题。
+
+**改动**（`src/App.tsx` 单文件）：
+- `onCloseRequested` 改为 `event.preventDefault()` + React state `showExitConfirm=true`，不再调 `plugin-dialog ask()`
+- 复用 `ConfirmDialog`（danger，红色 ghost 确认按钮），`onConfirm` → `@tauri-apps/plugin-process` `exit(0)`；文案复用 i18n `confirm.exit` / `common.confirm` / `common.cancel`
+- 防重入 guard：`closePendingRef` 在弹窗打开时置位，`exit(0)` 触发的再次 close 被吞掉，不重复弹窗
+- 移除 `tRef`（原为 onCloseRequested 闭包读最新 `t`；现文案 JSX 响应式渲染，不再需要）
+
+**主题跟随机制（已验证）**：`ConfirmDialog` 全用 Tailwind v4 `@theme` token（`bg-bg-card`/`border-border-subtle`/`text-text-primary`/`bg-error/10`）；主题 class（`.dark`/`.theme-*`/`.bg-theme-*`）统一挂 `documentElement`，portal 到 `body` 的对话框经 CSS 级联继承 → 配色自动跟随 GUI 主题（浅色/深色 + accent 配色 + 背景皮肤），零额外适配。
+
+**依赖决策**：`@tauri-apps/plugin-dialog` **保留**——仍被 9 处使用（文件选择 `open`/导出 `save`/CLI 卸载确认 `ask` 等），Rust `tauri_plugin_dialog::init()` 保留。不满足 issue 里"无其他使用点才清理"的条件。
+
+**验证**：tsc 干净、vitest 22/22、vite build 通过（bundle `index-QiRJCoq8.js`）、cargo release build 通过（3 个既有 dead_code warning）、exe 嵌入新 bundle（二进制 grep 确认）、便携版已覆盖。
+
+**issue**：[#12](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/12)

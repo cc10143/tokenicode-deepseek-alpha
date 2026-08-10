@@ -123,8 +123,8 @@ export function TaskPanel() {
     const byNewest = (a: TaskState, b: TaskState) => b.startTime - a.startTime;
     running.sort(byNewest);
     background.sort(byNewest);
-    done.sort((a, b) => (b.endTime || 0) - (a.endTime || 0)).slice(0, 50);
-    return { running, background, done, activeCount: running.length + background.length };
+    done.sort((a, b) => (b.endTime || 0) - (a.endTime || 0));
+    return { running, background, done: done.slice(0, 50), activeCount: running.length + background.length };
   }, [tasks]);
 
   const stopAll = () => {

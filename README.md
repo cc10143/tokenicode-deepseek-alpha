@@ -39,7 +39,6 @@
 - **Ctx 上下文占用恢复（CLI 2.1.195 兼容）**：CLI 2.1.195 的 stream-json 输出中 `message_start` 事件 usage 全为 0，真实 usage 只在 `result`。本 fork 从 `result` 事件恢复 `contextInputTokens` 快照，并让打开历史会话（命中内存缓存）与 App 重启 reconnect 时从会话 JSONL 回填上下文占用——修复"打开历史会话 Ctx 一直显示 0%，/compact 后才正常"。
 - **品牌化自定义标题栏**：窗口改为无边框（`decorations: false`）由前端自绘 36px 标题栏（最小化 / 最大化-还原 / 关闭按钮 + 拖拽区），配色跟随 GUI 主题；启动时 `visible: false` 隐藏窗口，React 首帧后显示（Rust 侧 6s 兜底），避免无边框窗口白屏闪窗。
 - **品牌化关闭确认对话框**：窗口关闭确认由原生 MessageBox 改为复用 `ConfirmDialog`（danger 变体）——React 状态驱动渲染、portal 到 body 经 CSS 级联自动跟随 GUI 主题（浅色/深色 + accent + 背景皮肤），确认后走 `exit(0)`，带防重入 guard 不重复弹窗。
-- **移除 Windows 系统边框 + 自绘 resize 手柄**：无边框窗口（`decorations: false`）下 Windows 仍在左/右/下三边绘制 ~8px 灰色 resize 边框（`WS_THICKFRAME`），把前端圆角容器包裹在直角系统框里。现从 Rust 侧清除 `WS_CAPTION | WS_THICKFRAME | WS_SYSMENU`（保留最大化/最小化能力），窗口缩放改由前端 `ResizeHandles` 自绘 8 方向热区接管（rAF 批处理 `setSize`/`setPosition`）；窗口最大化时圆角/边框归零贴边，body 背景对齐应用背景消除圆角外色差——实现真正干净的圆角无边框外观。代价：系统 `Win+←/→` 半屏分屏失效（依赖系统边框），`Win+↑` 最大化仍有效。
 
 ### v1.0.6
 

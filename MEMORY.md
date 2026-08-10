@@ -264,37 +264,4 @@ forked from mistydew/tokenicode-deepseek-alpha。
 
 **验证**：tsc 干净、vitest 22/22、vite build 通过（bundle `index-QiRJCoq8.js`）、cargo release build 通过（3 个既有 dead_code warning）、exe 嵌入新 bundle（二进制 grep 确认）、便携版已覆盖。
 
-## 2026-08-10 移除 Windows 系统边框 + 自绘 resize 手柄（issue #13）
-
-**背景**：用户反馈无边框窗口（`decorations: false`）仍有"Windows 系统默认窗口的黑边"，且应用圆角边框外有直角边框包裹。像素扫描实证（非猜测）：窗口 non-client **左 7px / 右 8px / 下 7px** 是系统灰色渐变边框 + 1px 黑线（RGB 24,24,24），顶部无（DWM 不渲染标题栏，但样式位残留 `WS_CAPTION`）。根因：Windows 无边框窗口保留 `WS_THICKFRAME`（为边缘缩放）绘制 resize 边框，前端 `gradient-bg` 22px 圆角容器被直角系统框包裹。
-
-**关键 API 事实（Tauri 2.10.2）**：
-- `decorations: false` 移除标题栏绘制（top non-client=0）但**样式位仍含 `WS_OVERLAPPEDWINDOW`**（GetWindowLongPtrW 读到的样式 ≠ DWM 实际渲染）
-- `WebviewWindow::hwnd()` 是 inherent 方法（`#[cfg(windows)]`），返回 `crate::Result<windows::HWND>`（`windows` crate 的 tuple struct，`.0` 是裸指针 `*mut c_void`）——非 `tauri::window::WindowExt` trait
-- `Manager::get_window()` **不存在**（Tauri 2.10 只有 `get_webview_window`）；`Webview::window()` 返回 `Window` 所有权拷贝
-- `windows-sys` 的 `HWND` 是 type alias（`*mut c_void`）不是 tuple struct，不能 `HWND(x)` 构造
-
-**修复（方案 A）**：
-1. **Rust `strip_system_frame`**（lib.rs，Cargo.toml 加 `windows-sys 0.61`）：`SetWindowLongPtrW` 清除 `WS_CAPTION | WS_THICKFRAME | WS_SYSMENU`，保留 `WS_MAXIMIZEBOX | WS_MINIMIZEBOX`，`SetWindowPos(SWP_FRAMECHANGED)` 让 DWM 重算。setup 里 `get_webview_window("main")` 后调用
-2. **`ResizeHandles.tsx`**（新建）：8 方向热区（N/S/E/W+4 角），`mousedown` 记 `outerPosition/outerSize`，`mousemove` 算新尺寸→`setSize`（W/N 方向需同步 `setPosition` 锚定对边），**rAF 批处理**每帧最多一次 IPC（防高频 setSize 拥塞），min 900x600，maximized 返回 null。顶部 6px 热区覆盖 TitleBar 顶部，下方 drag region 仍可拖拽
-3. **最大化圆角归零**：AppShell 监听 `isMaximized`，根容器加 `.is-maximized`，CSS `border-radius:0; border-width:0` + 隐藏 `::before/::after`
-4. **body 背景对齐**：body 用 `--skin-app-background`（原 `--skin-body-background`），消除圆角外 4 角 135deg vs 180deg 渐变微色差
-
-**皮肤变量作用域发现**：`--skin-body-background` 定义在 `:root, .dark, .theme-*` 联合选择器（App.css:689），dark 模式 body 仍是 garden 米黄——**不存在深色主题圆角外深色残留**；vscode/minimal 本身 body==app 一致。
-
-**已知代价**：`Win+←/→` 半屏分屏（Aero Snap）依赖 `WS_THICKFRAME` 可能失效；`Win+↑` 保留 `WS_MAXIMIZEBOX` 仍有效；DWM 矩形阴影仍在（不跟随圆角）。验证后视情况补 `shadow:false` 或接受。
-
-**验证**：cargo check exit 0（3 个既有 dead_code warning）、tsc 干净、vitest 22/22、vite build 通过、release 构建后截图实测灰边消失 + resize/maximize。
-
 **issue**：[#12](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/12)
-
-**2026-08-10 验证补遗（实机调试发现的 4 个关键坑）**：
-
-1. **WebView2 在 show 时重设窗口样式 → strip 必须挂 Resized 事件**：setup 里单次 `strip_system_frame` 实测**不生效**（日志显示 strip 成功 0x4CF0000→0x4030000，但 show 后枚举样式回到 0x14CF0000，三个样式位被加回）。WebView2 显示窗口时重新应用窗口样式。改为 `on_window_event(WindowEvent::Resized)` 内 strip——首次显示/布局必然触发 Resized，且函数幂等（样式正确后不再动）。**教训：Win32 样式修改要验证"show 之后"是否被覆盖，不能只看 strip 本身成功**
-2. **无 THICKFRAME 时最大化盖任务栏 → `clamp_maximized_to_work_area`**：`WS_THICKFRAME` 是系统判断"resizable→最大化到工作区"的依据，移除后系统最大化（前端 `win.maximize()` 和系统 `SC_MAXIMIZE`）都铺满整个 monitor（2560x1440 盖住任务栏）。Resized 回调里 `is_maximized() && 溢出工作区` 时 `SetWindowPos` clamp 回 `rcWork`（幂等）。**`GetMonitorInfoW`/`MonitorFromWindow`/`MONITORINFO`/`MONITOR_DEFAULTTONEAREST` 属于 `windows_sys::Win32::Graphics::Gdi`**（不在 WindowsAndMessaging），Cargo.toml feature 需加 `Win32_Graphics_Gdi`
-3. **capabilities 权限缺失 = resize 静默失败的最终根因**：`ResizeHandles` 的 `setSize`/`setPosition` 被 Tauri 权限系统静默拒绝（Promise reject 无提示），`outerPosition`/`outerSize` 在 `core:default` 所以 startDrag 正常、只有写入被拒。补 `core:window:allow-set-size` / `allow-set-position` / `allow-outer-size` / `allow-outer-position`。**教训：Tauri v2 前端调用 window API 前先确认 capabilities 权限；"点击命中热区但窗口不变"排查优先级是 权限 > 坐标 > 事件**
-4. **前端拖拽要 Pointer Events + setPointerCapture**：`mousemove` 在光标离开 webview 边界后丢失（真实用户快速拖拽滑出窗口会停），`setPointerCapture` 让 Chromium 跨窗口继续派发 `pointermove`。热区 6px→**8px**（标准 Windows resize 宽度）+ 容器 `-inset-[2px]`（覆盖 gradient-bg 的 2px border，原 border 区域无热区拖最边缘不响应）
-
-**实机验证（System.Drawing 像素 + Win32 + 模拟输入，全过）**：样式位 0x14030000（CAPTION/THICKFRAME/SYSMENU 清除 + MAX/MIN 保留）；四边灰框像素 0%（原 7-8px 灰框消失）；E 拖拽 widthDelta=114、S 拖拽 heightDelta=73（setSize 生效）；前端按钮最大化 2560x1390 对齐工作区不盖任务栏；restore 还原；右缘热区实际命中 CSS 1272-1277（border 2px 占 1277-1280，右缘最外 2px 无热区为已知限制）。
-
-**issue**：[#13](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/13)

@@ -879,6 +879,30 @@ fn safe_preview(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
+/// RFC3339 timestamp (`2026-08-10T14:16:54.414Z`) → unix 秒。
+/// 手动解析(Hinnant days_from_civil 算法), 避免引入 chrono 直接依赖。
+/// 注意: 所有除法必须用 floor 语义(`div_euclid`), Rust 的 `/` 是截断除法,
+/// 对负数年份/月份会算错(1970-01-01 验证)。
+/// A 层 (issue #18): 用于过滤 JSONL 里本次 spawn 之前的历史 compact_boundary。
+fn rfc3339_to_unix(s: &str) -> Option<i64> {
+    if s.len() < 19 { return None; }
+    let y: i64 = s[0..4].parse().ok()?;
+    let mo: i64 = s[5..7].parse().ok()?;
+    let d: i64 = s[8..10].parse().ok()?;
+    let h: i64 = s[11..13].parse().ok()?;
+    let mi: i64 = s[14..16].parse().ok()?;
+    let sec: i64 = s[17..19].parse().ok()?;
+    // days_from_civil (Howard Hinnant)
+    let mut yy = y;
+    if mo <= 2 { yy -= 1; }
+    let era = yy.div_euclid(400);
+    let yoe = yy - era * 400; // [0, 399]
+    let doy = (153 * (mo + if mo > 2 { -3 } else { 9 }) + 2).div_euclid(5) + d - 1;
+    let doe = yoe * 365 + yoe.div_euclid(4) - yoe.div_euclid(100) + doy;
+    let days = era * 146097 + doe - 719468;
+    Some(days * 86400 + h * 3600 + mi * 60 + sec)
+}
+
 /// Read the effective model from ~/.claude/settings.json for inherit mode display.
 /// Resolves the `model` tier (haiku/sonnet/opus) through ANTHROPIC_DEFAULT_{TIER}_MODEL_NAME
 /// so the GUI shows the upstream model name (e.g. deepseek-v4-flash) that CC-Switch uses.
@@ -1907,6 +1931,12 @@ async fn start_claude_session(
     let is_bypass = permission_mode == "bypassPermissions";
     let session_pid = pid;
     let session_cwd = cwd_for_session.clone();
+    // A 层 (issue #18): spawn 时刻的墙钟(unix 秒), 用于过滤 JSONL 里本次 spawn 之前的历史
+    // compact_boundary, 避免 watchdog 重放历史压缩记录污染前端 context tokens。
+    let spawn_wall_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     tokio::spawn(async move {
         let stream_event = format!("claude:stream:{}", sid_clone);
         // Use a large buffer (1MB) to efficiently read large NDJSON lines from Claude CLI.
@@ -1930,6 +1960,8 @@ async fn start_claude_session(
         // silence after a turn is never mistaken for a stdout stall (issue #10).
         let mut watchdog_armed: bool = true;
         let mut jsonl_baseline_inited: bool = false;
+        // A 层 (issue #18): 已 emit 的 compact_boundary timestamp(去重, 防止重复补发)
+        let mut jsonl_emitted_compact_ts: Option<String> = None;
         loop {
             let line = match tokio::time::timeout(std::time::Duration::from_secs(10), lines.next_line()).await {
                 Ok(Ok(Some(line))) => line,
@@ -2014,6 +2046,37 @@ async fn start_claude_session(
                                             }
                                         }
                                         jsonl_emitted_assistant_count = assistant_idx;
+                                        last_text_activity = std::time::Instant::now();
+                                        break;
+                                    }
+                                    // A 层 (issue #18): 补发被 stdout 块缓冲吞掉的 compact_boundary。
+                                    // CLI 压缩完成信号走 stream-json 事件, Windows 4KB 块缓冲会卡住 <4KB
+                                    // 输出, 前端收不到 compact_boundary → 命令卡永不完成 / auto-compact 误判失败。
+                                    // 从 JSONL 检测 compact_boundary 记录并 emit(仅本次 spawn 之后 + 未 emit 过)。
+                                    for jsonl_line in content.lines() {
+                                        let j = match serde_json::from_str::<Value>(jsonl_line) {
+                                            Ok(j) => j, Err(_) => continue,
+                                        };
+                                        if j.get("type").and_then(|v| v.as_str()) != Some("system") { continue; }
+                                        if j.get("subtype").and_then(|v| v.as_str()) != Some("compact_boundary") { continue; }
+                                        let ts = j.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        if ts.is_empty() || Some(&ts) == jsonl_emitted_compact_ts.as_ref() { continue; }
+                                        // 只补发本次 spawn 之后出现的 boundary, 避免重放历史压缩记录污染前端 context tokens
+                                        if rfc3339_to_unix(&ts).map(|u| u < spawn_wall_unix).unwrap_or(true) { continue; }
+                                        jsonl_emitted_compact_ts = Some(ts.clone());
+                                        log::info!("[TOKENICODE:watchdog] synthesizing compact_boundary from JSONL (session={})", cid);
+                                        let compact_metadata = j.get("compact_metadata").cloned().unwrap_or(serde_json::Value::Null);
+                                        let payload = serde_json::json!({
+                                            "type": "system",
+                                            "subtype": "compact_boundary",
+                                            "compact_metadata": compact_metadata,
+                                            "session_id": cid,
+                                        });
+                                        if let Err(e1) = app_clone.emit_to("main", &stream_event, payload.clone()) {
+                                            if let Err(_e2) = app_clone.emit(&stream_event, payload) {
+                                                log::info!("[TOKENICODE:watchdog] emit compact_boundary failed: {}", e1);
+                                            }
+                                        }
                                         last_text_activity = std::time::Instant::now();
                                         break;
                                     }
@@ -9005,6 +9068,17 @@ mod decode_tests {
         assert_eq!(usage["totalOutputTokens"], 30);
         assert_eq!(usage["contextInputTokens"], 1100);
         assert_eq!(usage["contextOutputTokens"], 10);
+    }
+
+    #[test]
+    fn test_rfc3339_to_unix() {
+        // 基准 + 闰年 + 普通日期(A 层 watchdog 过滤历史 compact_boundary 的时间基准)
+        assert_eq!(super::rfc3339_to_unix("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(super::rfc3339_to_unix("2000-01-01T00:00:00.000Z"), Some(946684800));
+        assert_eq!(super::rfc3339_to_unix("2024-02-29T00:00:00.000Z"), Some(1709164800)); // 闰日
+        assert_eq!(super::rfc3339_to_unix("2026-08-10T14:16:54.414Z"), Some(1786371414));
+        assert_eq!(super::rfc3339_to_unix("2026-08-10T23:59:59.000Z"), Some(1786406399));
+        assert_eq!(super::rfc3339_to_unix("bad-timestamp"), None);
     }
 
     #[cfg(target_os = "windows")]

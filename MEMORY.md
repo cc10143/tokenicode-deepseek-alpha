@@ -305,3 +305,27 @@ forked from mistydew/tokenicode-deepseek-alpha。
 - **无 fast mode control 通道**（Alt+O 只能走 `/fast` 斜杠命令 send_stdin）
 
 **issue**：[#16](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/16)
+
+## 2026-08-10 compact 确认链路根治（issue #18）
+
+**背景**：40e3254c 会话（`claude-opus-4-8[1M]`，4 小时长会话）内 `/compact` 卡「正在执行」永久不完成，命令卡显示 `Auto-compact failed after 3 attempts` / `Error during compaction: summarization produced empty response` / `Not enough messages to compact.`。自动压缩很多次第一次遇见，一旦发生会话卡死。
+
+**实证**（JSONL + tokenicode.log 铁证，决定根因判断）：
+- 第 2 次 `/compact`（14:16:22 手动）**实际成功**：`compact_boundary` 写入 JSONL（14:16:54）+ 摘要注入 + hook_success SessionStart:compact
+- 但 **stdout 侧无 compact_boundary/compact_result/result**（只有 hook 活动 + status）——Windows 4KB 块缓冲吞掉确认
+- 第 3 次压缩 TOKENICODE **无 send_stdin 记录**，JSONL 有命令卡 + `local_command`「Not enough messages to compact.」→ CLI 内部 auto-compact 触发
+- CLI 失败/异常是 stdout 文本（`system/local_command`，payload `<local-command-stdout>…</local-command-stdout>`），前端不解析
+
+**三处架构缺陷 → 三层修复**：
+1. **确认信号走 stdout，块缓冲会吞**（A 层）：watchdog 扫描 JSONL 时补发 `compact_boundary`。关键实现：`spawn_wall_unix`（spawn 时刻墙钟）+ `rfc3339_to_unix` 过滤本次 spawn 之前的历史 boundary；`jsonl_emitted_compact_ts` 去重。
+2. **CLI 错误是文本，前端不解析**（B 层）：`handleCompactLocalCommand` 解析 `local_command` content——`Not enough messages to compact` 终止 auto 重试（`compactRetryRef = MAX`）、`Error during compaction` 记失败。
+3. **pendingCommandMsgId 单字段竞争**（C 层）：`SessionMeta.pendingCompactCmdIds` 数组，`completeCompactCards` 批量标完成。
+
+**踩坑（写进 memory）**：
+- **Rust `/` 是截断除法（向零），Hinnant days_from_civil 必须用 `div_euclid`（floor）**，否则 1970-01-01 算出 210866803200 而不是 0。rfc3339_to_unix 测试用例锁死 1970/2000/2024 闰日/2026 基准。
+- `cargo test` 全量 2 个失败（`test_hyphenated_dir`/`test_space_in_dir_name`）为**既有问题**（decode_project_name 路径解码：`ppt-maker` → `ppt/maker`），与本次改动无关，未修。
+- 便携版 exe 覆盖被占用（GUI 运行中），用户选择暂不覆盖；release exe 在 `src-tauri/target/release/tokenicode.exe`。
+
+**验证**：tsc 干净、vitest 22/22、vite build 通过、cargo check 干净（3 个既有 dead_code）、cargo test 26 passed、`pnpm tauri build --no-bundle` exit 0。
+
+**issue**：[#18](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/18)

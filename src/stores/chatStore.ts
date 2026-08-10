@@ -91,6 +91,13 @@ export interface SessionMeta {
   stdinId?: string;
   /** Message ID of a pending processing card (for CLI slash commands) */
   pendingCommandMsgId?: string;
+  /**
+   * Pending compact command card IDs (auto + manual, issue #18 C 层).
+   * 单字段 pendingCommandMsgId 会被 auto/manual 竞争覆盖, 先注册的卡永远等不到
+   * compact_boundary 标完成。改为数组追踪所有进行中的 compact 命令卡,
+   * compact 确认到达时批量标完成。
+   */
+  pendingCompactCmdIds?: string[];
   /** Accumulated input tokens from stream events (message_start) — per turn, reset each turn */
   inputTokens?: number;
   /** Accumulated output tokens from stream events (message_delta) — per turn, reset each turn */

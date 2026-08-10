@@ -910,6 +910,81 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
   }, [exitPlanModeSeenRef]);
 
   /**
+   * 批量完成所有进行中的 compact 命令卡 (issue #18 C 层)。
+   * pendingCommandMsgId 单字段会被 auto/manual 竞争覆盖, 先注册的卡永远等不到确认;
+   * 改为追踪 pendingCompactCmdIds 数组, 压缩确认到达时批量标完成。
+   * 兼容旧路径: 若当前 pendingCommandMsgId 也指向 compact 卡(未入数组), 一并处理。
+   * 已完成的卡(如 60s 超时已标失败)跳过, 不覆盖其结果。
+   */
+  const completeCompactCards = useCallback((tabId: string, output: string) => {
+    const st = useChatStore.getState().getTab(tabId);
+    const meta = st?.sessionMeta ?? {};
+    const ids = [...(meta.pendingCompactCmdIds ?? [])];
+    if (meta.pendingCommandMsgId && !ids.includes(meta.pendingCommandMsgId)) {
+      const m = st?.messages?.find((mm) => mm.id === meta.pendingCommandMsgId);
+      if (m?.commandData?.command?.includes('/compact')) ids.push(meta.pendingCommandMsgId);
+    }
+    for (const id of ids) {
+      const m = st?.messages?.find((mm) => mm.id === id);
+      if (!m || m.commandCompleted) continue;
+      const existing = m.commandData;
+      useChatStore.getState().updateMessage(tabId, id, {
+        commandCompleted: true,
+        commandData: { ...existing, output, completedAt: Date.now() },
+      });
+    }
+    if (ids.length > 0) {
+      const next: Record<string, unknown> = { pendingCompactCmdIds: [] };
+      if (meta.pendingCommandMsgId && ids.includes(meta.pendingCommandMsgId)) {
+        next.pendingCommandMsgId = undefined;
+      }
+      useChatStore.getState().setSessionMeta(tabId, next);
+      if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
+        useChatStore.getState().setSessionStatus(tabId, 'idle');
+      }
+    }
+  }, []);
+
+  /**
+   * B 层 (issue #18): CLI 压缩失败/异常走 stdout 文本(system/local_command),
+   * 前端之前不解析 → 命令卡永不完成 / auto-compact 无限重试。
+   * 解析 local_command 的 content 文本作为 compact_boundary/compact_result 的补充确认信号。
+   * 注意: content 形如 '<local-command-stdout>…</local-command-stdout>'。
+   */
+  const handleCompactLocalCommand = useCallback((msg: any, tabId: string) => {
+    const content = typeof msg.content === 'string' ? msg.content : '';
+
+    // "Not enough messages to compact." → 上下文无可压缩。auto-compact 立即终止(不再重试),
+    // 手动命令卡标"无需压缩"。CLI 认为没必要压缩, 重试无意义。
+    if (content.includes('Not enough messages to compact')) {
+      if (compactInFlightRef.current) {
+        compactRetryRef.current = MAX_COMPACT_RETRIES; // 终止 auto 重试
+        compactConfirmedRef.current = true;
+        compactInFlightRef.current = false;
+        console.log('[TOKENICODE] Compact: no messages to compact, auto-retry stopped');
+      }
+      completeCompactCards(tabId, '无需压缩: 上下文无可压缩消息');
+      return;
+    }
+
+    // "Error during compaction: X" → 压缩失败。auto: 记一次失败并释放 in-flight(下轮 result 超阈值会重触发);
+    // manual: 命令卡标失败, 用户自行重试(不动 retryRef)。
+    if (content.includes('Error during compaction')) {
+      const isAuto = compactInFlightRef.current;
+      if (isAuto) {
+        compactRetryRef.current += 1;
+        compactConfirmedRef.current = true;
+      }
+      compactInFlightRef.current = false;
+      console.warn('[TOKENICODE] Compact failed (local_command):', content.slice(0, 120));
+      completeCompactCards(tabId, isAuto
+        ? '自动压缩失败, 可手动输入 /compact 重试'
+        : 'Compact 失败, 可重新输入 /compact 重试');
+      return;
+    }
+  }, [completeCompactCards, compactInFlightRef, compactRetryRef, compactConfirmedRef]);
+
+  /**
    * Handle stream messages for the foreground (active) tab.
    */
   const handleStreamMessage = useCallback((msg: any) => {
@@ -1298,21 +1373,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             // 置 confirmed 避免 60s 超时兜底误判重试
             compactConfirmedRef.current = true;
             compactInFlightRef.current = false;
-            const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
-            if (pendingCmd) {
-              useChatStore.getState().updateMessage(tabId, pendingCmd, {
-                commandCompleted: true,
-                commandData: {
-                  ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
-                  output: 'Compact 完成',
-                  completedAt: Date.now(),
-                },
-              });
-              useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
-              if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
-                useChatStore.getState().setSessionStatus(tabId, 'idle');
-              }
-            }
+            completeCompactCards(tabId, 'Compact 完成');
           } else if (msg.compact_result) {
             // compact_result 为 "error"（CLI 明确压缩失败）。
             // auto-compact（compactInFlightRef）: 记一次失败并释放 in-flight,
@@ -1326,23 +1387,9 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
               compactConfirmedRef.current = true;
             }
             compactInFlightRef.current = false;
-            const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
-            if (pendingCmd) {
-              useChatStore.getState().updateMessage(tabId, pendingCmd, {
-                commandCompleted: true,
-                commandData: {
-                  ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
-                  output: isAuto
-                    ? '自动压缩失败, 可手动输入 /compact 重试'
-                    : 'Compact 失败, 可重新输入 /compact 重试',
-                  completedAt: Date.now(),
-                },
-              });
-              useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
-              if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
-                useChatStore.getState().setSessionStatus(tabId, 'idle');
-              }
-            }
+            completeCompactCards(tabId, isAuto
+              ? '自动压缩失败, 可手动输入 /compact 重试'
+              : 'Compact 失败, 可重新输入 /compact 重试');
           }
         } else if (msg.subtype === 'compact_boundary') {
           // --- 验证式 auto-compact: compact_boundary 是压缩完成的确定信号 ---
@@ -1354,29 +1401,19 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
           const reduced = pre > 0 && post < pre;   // 压缩确实发生: post < pre
           // 压缩完成后立即刷新上下文占用, 让 auto-compact 判据自然失效
           setSessionMeta({ contextInputTokens: post, contextOutputTokens: 0 });
-          const pendingCmd = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCommandMsgId;
-          if (pendingCmd) {
-            const percent = reduced ? Math.round((1 - post / pre) * 100) : 0;
-            useChatStore.getState().updateMessage(tabId, pendingCmd, {
-              commandCompleted: true,
-              commandData: {
-                ...(useChatStore.getState().getTab(tabId)?.messages ?? []).find((m) => m.id === pendingCmd)?.commandData,
-                output: reduced
-                  ? `Compact ${cm.trigger} 完成: ${pre.toLocaleString()} → ${post.toLocaleString()} tokens (-${percent}%)`
-                  : 'Compact 完成但上下文未下降',
-                completedAt: Date.now(),
-              },
-            });
-            useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
-            if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
-              useChatStore.getState().setSessionStatus(tabId, 'idle');
-            }
-          }
+          const percent = reduced ? Math.round((1 - post / pre) * 100) : 0;
+          completeCompactCards(tabId, reduced
+            ? `Compact ${cm.trigger} 完成: ${pre.toLocaleString()} → ${post.toLocaleString()} tokens (-${percent}%)`
+            : 'Compact 完成但上下文未下降');
           compactConfirmedRef.current = true;
           compactInFlightRef.current = false;
         } else if (msg.subtype && msg.subtype.startsWith('task_')) {
           // Task-tool subagent / background task lifecycle (issue #16)
           handleTaskSystemMessage(msg);
+        } else if (msg.subtype === 'local_command') {
+          // B 层 (issue #18): CLI 压缩失败/异常以 stdout 文本(local_command)输出,
+          // 作为 compact_boundary/compact_result 的补充确认信号
+          handleCompactLocalCommand(msg, tabId);
         } else {
           // FI-3: Log unknown subtypes so we know what we're missing
           console.warn('[TOKENICODE] Unhandled system subtype:', msg.subtype, msg);
@@ -2149,8 +2186,10 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
             commandCompleted: false,
             timestamp: Date.now(),
           });
-          // FI-4: Register pendingCommandMsgId so compact_boundary can mark it completed
-          setSessionMeta({ pendingCommandMsgId: compactMsgId });
+          // FI-4: 追踪 compact 命令卡(auto 也入 pendingCompactCmdIds, issue #18 C 层),
+          // 保留 pendingCommandMsgId 兼容 60s 兜底单卡标记
+          const existingCompactIds = useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCompactCmdIds ?? [];
+          setSessionMeta({ pendingCommandMsgId: compactMsgId, pendingCompactCmdIds: [...existingCompactIds, compactMsgId] });
           setSessionStatus('running');
           setActivityStatus({ phase: 'thinking' });
           bridge.sendStdin(compactStdinId, '/compact').catch((err) => {
@@ -2174,7 +2213,10 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
                     completedAt: Date.now(),
                   },
                 });
-                useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: undefined });
+                useChatStore.getState().setSessionMeta(tabId, {
+                  pendingCommandMsgId: undefined,
+                  pendingCompactCmdIds: (useChatStore.getState().getTab(tabId)?.sessionMeta.pendingCompactCmdIds ?? []).filter((id) => id !== compactMsgId),
+                });
                 if (useChatStore.getState().getTab(tabId)?.sessionStatus === 'running') {
                   useChatStore.getState().setSessionStatus(tabId, 'idle');
                 }
@@ -2384,7 +2426,7 @@ export function useStreamProcessor(config: StreamProcessorConfig) {
         });
       }
     }
-  }, [handleBackgroundStreamMessage, exitPlanModeSeenRef, compactInFlightRef, compactRetryRef, compactConfirmedRef, silentRestartRef, handleSubmitRef, handleStderrLineRef, setInputSync]);
+  }, [handleBackgroundStreamMessage, exitPlanModeSeenRef, handleCompactLocalCommand, completeCompactCards, compactInFlightRef, compactRetryRef, compactConfirmedRef, silentRestartRef, handleSubmitRef, handleStderrLineRef, setInputSync]);
 
   return { handleStreamMessage, handleBackgroundStreamMessage };
 }

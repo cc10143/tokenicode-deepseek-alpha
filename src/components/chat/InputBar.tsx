@@ -638,7 +638,15 @@ export function InputBar() {
             commandCompleted: false,
             timestamp: Date.now(),
           });
-          useChatStore.getState().setSessionMeta(tabId, { pendingCommandMsgId: processingMsgId });
+          const currentMeta = useChatStore.getState().getTab(tabId)?.sessionMeta ?? {};
+          useChatStore.getState().setSessionMeta(tabId, {
+            pendingCommandMsgId: processingMsgId,
+            // C 层 (issue #18): /compact 命令卡入 pendingCompactCmdIds, 与 auto-compact 统一追踪,
+            // 避免单字段 pendingCommandMsgId 被 auto/manual 竞争覆盖导致前卡永不完成
+            ...(cmd === 'compact'
+              ? { pendingCompactCmdIds: [...(currentMeta.pendingCompactCmdIds ?? []), processingMsgId] }
+              : {}),
+          });
           useChatStore.getState().setSessionStatus(tabId, 'running');
           useChatStore.getState().setActivityStatus(tabId, { phase: 'thinking' });
           await bridge.sendStdin(stdinId, `/${cmd}${args ? ' ' + args : ''}`);

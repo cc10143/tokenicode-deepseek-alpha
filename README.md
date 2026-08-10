@@ -40,6 +40,7 @@
 - **品牌化自定义标题栏**：窗口改为无边框（`decorations: false`）由前端自绘 36px 标题栏（最小化 / 最大化-还原 / 关闭按钮 + 拖拽区），配色跟随 GUI 主题；启动时 `visible: false` 隐藏窗口，React 首帧后显示（Rust 侧 6s 兜底），避免无边框窗口白屏闪窗。
 - **品牌化关闭确认对话框**：窗口关闭确认由原生 MessageBox 改为复用 `ConfirmDialog`（danger 变体）——React 状态驱动渲染、portal 到圆角容器（`.gradient-bg`）经 CSS 级联自动跟随 GUI 主题（浅色/深色 + accent + 背景皮肤），确认后走 `exit(0)`，带防重入 guard 不重复弹窗。
 - **透明圆角窗口**：窗口 `transparent: true` + `shadow: false`——Windows 无边框窗口保留的 9px 黑色 resize 边距被透明窗口根除（`shadow: false` 是去黑框关键，否则透明 + 默认 shadow 产生黑框），窗口 rect 与内容一致不再被撑大；前端 `gradient-bg` 22px 圆角容器外的 4 角透出桌面壁纸（真正圆角边缘）；最大化时圆角归零填应用背景；ConfirmDialog 遮罩 portal 到圆角容器内不溢出圆角。
+- **compact 确认链路根治**：`/compact` 卡「正在执行」永久不完成的问题（Windows 块缓冲吞掉压缩成功确认 + CLI 错误文本不解析 + 命令卡关联竞争）三层根治：① watchdog 从 JSONL 兜底补发 `compact_boundary`（只补发本次 spawn 之后的，手动解析 RFC3339 时间戳过滤历史）——压缩成功但确认被吞时不再 60s 超时误判失败；② 解析 `local_command` 文本——`Not enough messages to compact` 终止 auto 重试、`Error during compaction` 明确标失败；③ `pendingCompactCmdIds` 数组批量标完成全部 compact 命令卡，auto 与手动不再互相覆盖。
 
 ### v1.0.6
 

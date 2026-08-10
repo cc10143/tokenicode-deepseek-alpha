@@ -17,6 +17,7 @@ All notable changes to TOKENICODE will be documented in this file.
 
 - **验证式 auto-compact（issue #8）** — 消费 CLI 2.1.195 的 `compact_boundary` 事件：压缩完成后立即刷新上下文占用（`contextInputTokens = post_tokens`，让 auto-compact 判据自然失效），命令卡显示 `pre → post tokens (-X%)`。auto-compact 从一次性 flag 改为验证式 + 重试（60s 未确认自动重试，最多 3 次，耗尽标失败）。手动 `/compact` 不再由 `result` 抢先标完成——延迟 3s 等 `compact_boundary` 优先，超时读会话 JSONL 校正 Ctx + result 文本兜底标完成，避免命令卡永久 running。
 - **stdout 看门狗误触发重放历史修复（issue #10）** — 看门狗原先只看 `last_text_activity` 静默 10s，无法区分"stdout 真卡住（块缓冲）"与"CLI 回合正常完成、等待下一条输入"。长历史会话中，回合完成后停顿 >10s 会把整个会话历史逐条合成重放（每 10 秒一条，前端因流式 id `uuid_text_N` 与加载 id `uuid` 不一致绕过去重）。修复：① 引入 `watchdog_armed` 门控——stdout 收到 `result` 即 disarm，看门狗只在 CLI 回合进行中（spawn→result）触发；② 首次扫描 JSONL 时把 `jsonl_emitted_assistant_count` 基线设为最后一个 `end_turn` assistant 序号，历史永不被当成"未送达"重放。方案 8 的块缓冲补发能力保留。
+- **compact 确认链路根治（issue #18）** — `/compact` 卡「正在执行」永久不完成（会话 40e3254c 实证）。三层修复：① **watchdog 兜底补发 `compact_boundary`**——stdout 看门狗扫描 JSONL 时检测 `system/subtype=compact_boundary` 记录并 emit 给前端（`spawn_wall_unix` + `rfc3339_to_unix` 过滤本次 spawn 之前的历史，`jsonl_emitted_compact_ts` 去重），解决 Windows 4KB 块缓冲吞掉压缩成功确认导致 60s 超时误判失败；② **解析 CLI 压缩结果文本**——`local_command` 的 `Not enough messages to compact` 终止 auto 重试（不再无限重试）、`Error during compaction` 记失败并标完成命令卡；③ **命令卡关联修正**——`pendingCommandMsgId` 单字段被 auto/manual 竞争覆盖，改为 `pendingCompactCmdIds` 数组批量标完成全部 compact 卡。
 
 ---
 

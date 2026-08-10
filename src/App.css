@@ -1043,7 +1043,9 @@ input, textarea, [contenteditable="true"],
 
 body {
   font-family: var(--tokenicode-font-family, "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", Arial, sans-serif);
-  background: var(--skin-body-background);
+  /* Use the app background (not skin-body-background) so the 4 corners outside
+     the 22px gradient-bg rounded frame blend seamlessly with the app interior. */
+  background: var(--skin-app-background);
 }
 
 .gradient-bg {
@@ -1052,6 +1054,18 @@ body {
   border: 2px solid var(--skin-border-strong);
   border-radius: 22px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+/* When maximized the rounded frame no longer hugs the screen edges — drop the
+   radius/border and hide the dashed decor so content touches the corners. */
+.gradient-bg.is-maximized {
+  border-radius: 0;
+  border-width: 0;
+}
+
+.gradient-bg.is-maximized::before,
+.gradient-bg.is-maximized::after {
+  display: none;
 }
 
 .gradient-bg::before {

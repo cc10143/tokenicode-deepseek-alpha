@@ -2707,6 +2707,122 @@ async fn untrack_session(session_id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove the Windows system resize frame that survives `decorations: false`.
+/// Windows keeps `WS_THICKFRAME` for edge-resize, which draws a ~8px gray border
+/// + 1px dark line on the left/right/bottom edges and wraps the frontend's
+/// rounded container in a square system frame. We strip the whole non-client
+/// group (`WS_CAPTION | WS_THICKFRAME | WS_SYSMENU`) but keep
+/// `WS_MAXIMIZEBOX` / `WS_MINIMIZEBOX` so maximize/minimize still work.
+/// Resizing is taken over by the frontend ResizeHandles component.
+#[cfg(target_os = "windows")]
+fn strip_system_frame(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_SYSMENU, WS_THICKFRAME,
+    };
+
+    let hwnd = match window.hwnd() {
+        Ok(h) => h.0,
+        Err(e) => {
+            log::warn!("[TOKENICODE:diag] strip_system_frame: hwnd() failed: {}", e);
+            return;
+        }
+    };
+    if hwnd.is_null() {
+        log::warn!("[TOKENICODE:diag] strip_system_frame: null hwnd");
+        return;
+    }
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
+    let remove = (WS_CAPTION | WS_THICKFRAME | WS_SYSMENU) as isize;
+    let new_style = style & !remove;
+    if new_style != style {
+        unsafe {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, new_style);
+            // SWP_FRAMECHANGED forces DWM to recompute the non-client area.
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        log::info!(
+            "[TOKENICODE:diag] strip_system_frame: removed WS_CAPTION|WS_THICKFRAME|WS_SYSMENU (style 0x{:X} -> 0x{:X})",
+            style,
+            new_style
+        );
+    }
+}
+
+/// Windows maximizes a frameless window (no WS_THICKFRAME) to the *whole
+/// monitor* instead of the work area, hiding the taskbar — WS_THICKFRAME is
+/// the flag Windows uses to decide "resizable → maximize to work area". We
+/// clamp the window back to the work area whenever it is maximized and
+/// overflows. Idempotent: no-op once the size matches the work area.
+#[cfg(target_os = "windows")]
+fn clamp_maximized_to_work_area(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER,
+    };
+
+    let hwnd = match window.hwnd() {
+        Ok(h) => h.0,
+        Err(_) => return,
+    };
+    if hwnd.is_null() {
+        return;
+    }
+
+    let mut current = unsafe { std::mem::zeroed::<RECT>() };
+    if unsafe { GetWindowRect(hwnd, &mut current) } == 0 {
+        return;
+    }
+
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let mut info = unsafe { std::mem::zeroed::<MONITORINFO>() };
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return;
+    }
+
+    let work_w = info.rcWork.right - info.rcWork.left;
+    let work_h = info.rcWork.bottom - info.rcWork.top;
+    let cur_w = current.right - current.left;
+    let cur_h = current.bottom - current.top;
+
+    // Only act when the window actually overflows the work area (the
+    // maximized-to-monitor case); leave plain resizes untouched.
+    if cur_w == work_w && cur_h == work_h {
+        return;
+    }
+
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            info.rcWork.left,
+            info.rcWork.top,
+            work_w,
+            work_h,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+    }
+    log::info!(
+        "[TOKENICODE:diag] clamp_maximized_to_work_area: {}x{} at ({},{})",
+        work_w,
+        work_h,
+        info.rcWork.left,
+        info.rcWork.top
+    );
+}
+
 /// One-time cleanup: remove desk_* entries and duplicates from tracked_sessions.txt.
 /// Uses atomic write (write to temp file, then rename) to prevent truncation on crash.
 fn cleanup_tracked_sessions() {
@@ -8834,6 +8950,30 @@ pub fn run() {
         .setup(|app| {
             // titleBarStyle: "Overlay" in tauri.conf.json handles macOS traffic lights
             // and native titlebar drag/double-click-to-maximize automatically.
+
+            // Remove the Windows system resize frame (left/right/bottom ~8px gray
+            // border) that survives decorations: false. Window resizing is handled
+            // by the frontend ResizeHandles component.
+            //
+            // Note: stripping once here is too early — WebView2 re-applies
+            // WS_CAPTION|WS_THICKFRAME|WS_SYSMENU when it shows the window, so the
+            // bits come back by the time the user sees it. Hook WindowEvent::Resized
+            // instead: it fires on first show/layout (after the re-apply), and the
+            // strip is idempotent (no-op once the bits are already clear).
+            #[cfg(target_os = "windows")]
+            if let Some(w) = app.get_webview_window("main") {
+                let w_strip = w.clone();
+                w.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Resized(_) = event {
+                        strip_system_frame(&w_strip);
+                        // Maximize with no WS_THICKFRAME fills the whole monitor
+                        // (hiding the taskbar); clamp back to the work area.
+                        if w_strip.is_maximized().unwrap_or(false) {
+                            clamp_maximized_to_work_area(&w_strip);
+                        }
+                    }
+                });
+            }
 
             // One-time cleanup: purge desk_* entries from tracked_sessions.txt
             cleanup_tracked_sessions();

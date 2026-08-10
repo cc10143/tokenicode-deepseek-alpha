@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { TitleBar } from './TitleBar';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFileStore } from '../../stores/fileStore';
@@ -30,6 +31,26 @@ export function AppShell({ sidebar, main, secondary }: AppShellProps) {
   const secondaryPanelOpen = useSettingsStore((s) => s.secondaryPanelOpen);
   const secondaryPanelWidth = useSettingsStore((s) => s.secondaryPanelWidth);
   const toggleSecondaryPanel = useSettingsStore((s) => s.toggleSecondaryPanel);
+
+  /* When maximized the window fills the work area — the transparent window's
+     rounded corners would otherwise show the desktop behind the 4 corners.
+     Zero the radius (and hide the decorative dashed border) so the content
+     hugs the screen edges. */
+  const [isMaximized, setIsMaximized] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    const refresh = () => {
+      getCurrentWindow().isMaximized().then((m) => {
+        if (mounted) setIsMaximized(m);
+      });
+    };
+    refresh();
+    const unlisten = getCurrentWindow().onResized(refresh);
+    return () => {
+      mounted = false;
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   /* File preview state — when a file is selected, we enter "preview mode" */
   const selectedFile = useFileStore((s) => s.selectedFile);
@@ -206,7 +227,7 @@ export function AppShell({ sidebar, main, secondary }: AppShellProps) {
   const showFloatingSecondary = secondaryPanelOpen && isFilePreviewMode;
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden gradient-bg">
+    <div className={`flex flex-col h-full w-full overflow-hidden gradient-bg${isMaximized ? ' is-maximized' : ''}`}>
       <TitleBar />
 
       {/* Content row — all panels below the custom title bar */}

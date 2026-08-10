@@ -29,6 +29,11 @@ export function ConfirmDialog({
 
   const isDanger = variant === 'danger';
 
+  /* Portal into the rounded gradient-bg container (not document.body) so the
+     overlay stays clipped inside the window's rounded corners — the window is
+     transparent now, so a body-level portal would bleed past the corners. */
+  const portalTarget = document.querySelector<HTMLElement>('.gradient-bg') ?? document.body;
+
   return createPortal(
     <div
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40"
@@ -66,6 +71,6 @@ export function ConfirmDialog({
         </div>
       </div>
     </div>,
-    document.body,
+    portalTarget,
   );
 }

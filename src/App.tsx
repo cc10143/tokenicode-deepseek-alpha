@@ -661,6 +661,12 @@ function App() {
         return;
       }
       if (s.taskPanelOpen || s.agentPanelOpen || s.settingsOpen) return;
+      // Don't interrupt while editing text in a non-chat field (file rename,
+      // settings search, MCP form…) — Esc there means cancel, not stop.
+      const ae = document.activeElement as HTMLElement | null;
+      const inChatInput = !!ae?.closest?.('[data-chat-input]');
+      const inTextField = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable) && !inChatInput;
+      if (inTextField) return;
       interruptCurrentTurn();
     };
     window.addEventListener('keydown', handler);

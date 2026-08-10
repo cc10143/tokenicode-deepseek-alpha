@@ -306,6 +306,16 @@ forked from mistydew/tokenicode-deepseek-alpha。
 
 **issue**：[#16](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/16)
 
+## 2026-08-11 /hotkey 快捷键卡片（issue #16 配套）
+
+**背景**：用户问"已完成哪些快捷键 + 发 `?` 会不会弹快捷键提示"。`?` 是 CLI TTY 交互模式的帮助功能，fork 用 stream-json 纯管道（无 TTY），`?` 会被当普通消息发给模型；前端发送逻辑只拦截 `text.startsWith('/')`。GUI 内需要一个可查的快捷键清单。
+
+**改动**：`lib.rs` `list_all_commands` builtins 加 `("/hotkey", ..., "ui")`（数组 24→25，immediate）；`InputBar` `case 'hotkey'` 构造分组数据（面板与窗口 / 任务控制 / 输入框）；`MessageBubble` `CommandFeedbackMsg` 加 `hotkey` 分支（仿 help 卡片，分组 kbd + desc）；`chatStore.commandType` 加 `'hotkey'`；`i18n` 加 `cmd.hotkey*` + `slash.desc.hotkey`。
+
+**要点**：旧端点 `list_slash_commands`（前端无调用点）未加，保持原样。keys 字段用语言中立符号（Ctrl/Cmd + Scroll），desc 走 i18n。
+
+**验证**：tsc 干净、vitest 22/22、vite build 通过、cargo check 通过（3 个既有 dead_code warning）。
+
 ## 2026-08-10 compact 确认链路根治（issue #18）
 
 **背景**：40e3254c 会话（`claude-opus-4-8[1M]`，4 小时长会话）内 `/compact` 卡「正在执行」永久不完成，命令卡显示 `Auto-compact failed after 3 attempts` / `Error during compaction: summarization produced empty response` / `Not enough messages to compact.`。自动压缩很多次第一次遇见，一旦发生会话卡死。

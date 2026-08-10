@@ -379,6 +379,52 @@ function CommandFeedbackMsg({ message }: Props) {
     );
   }
 
+  // --- Hotkey: grouped keyboard shortcut list ---
+  if (cType === 'hotkey') {
+    const groups: Array<{ title: string; keys: Array<{ keys: string; desc: string }> }>
+      = data.groups || [];
+    return (
+      <div className="ml-11 my-1 animate-fade-in">
+        <div className="rounded-lg border border-border-subtle
+          bg-bg-secondary/50 overflow-hidden max-w-md">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-3 py-1.5
+            border-b border-border-subtle/50 bg-bg-tertiary/30">
+            <span className="text-xs">⌨️</span>
+            <span className="text-xs font-semibold text-text-primary">
+              {safeContent(message.content)}
+            </span>
+          </div>
+          {/* Groups */}
+          {groups.map((group, gi) => (
+            <div key={gi}>
+              {gi > 0 && <div className="mx-3 border-t border-border-subtle/40" />}
+              <div className="px-3 pt-2 text-[10px] font-medium text-text-tertiary
+                uppercase tracking-wider">
+                {group.title}
+              </div>
+              <div className="p-2 pt-1 space-y-0.5">
+                {group.keys.map((item, ki) => (
+                  <div key={ki} className="flex items-center gap-2 px-1.5 py-1
+                    rounded hover:bg-bg-tertiary/40 transition-colors">
+                    <kbd className="text-[10px] px-1.5 py-0.5 rounded border
+                      border-border-subtle text-text-tertiary bg-bg-secondary
+                      font-mono whitespace-nowrap flex-shrink-0">
+                      {item.keys}
+                    </kbd>
+                    <span className="text-[11px] text-text-muted truncate">
+                      {item.desc}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // --- Action feedback: inline with icon/spinner ---
   if (cType === 'action') {
     return (

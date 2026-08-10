@@ -450,7 +450,7 @@ export function InputBar() {
 
     // Helper: add a structured command feedback message
     const feedback = (
-      commandType: 'mode' | 'info' | 'help' | 'action' | 'error',
+      commandType: 'mode' | 'info' | 'help' | 'hotkey' | 'action' | 'error',
       content: string,
       commandData?: Record<string, any>,
     ) => {
@@ -580,6 +580,39 @@ export function InputBar() {
           builtins,
           customCount,
           skillCount,
+        });
+        return;
+      }
+
+      case 'hotkey': {
+        feedback('hotkey', t('cmd.hotkeyTitle'), {
+          groups: [
+            {
+              title: t('cmd.hotkeyPanel'),
+              keys: [
+                { keys: 'Ctrl+T', desc: t('cmd.hotkeyToggleTaskPanel') },
+                { keys: 'Ctrl+K', desc: t('cmd.hotkeyCommandPalette') },
+                { keys: 'Ctrl+Tab', desc: t('cmd.hotkeyRecentSession') },
+                { keys: 'Ctrl + = / - / 0', desc: t('cmd.hotkeyZoom') },
+                { keys: 'Ctrl / Cmd + Scroll', desc: t('cmd.hotkeyZoomWheel') },
+              ],
+            },
+            {
+              title: t('cmd.hotkeyTask'),
+              keys: [
+                { keys: 'Ctrl+X → Ctrl+K', desc: t('cmd.hotkeyStopAllTasks') },
+              ],
+            },
+            {
+              title: t('cmd.hotkeyInput'),
+              keys: [
+                { keys: 'Enter / Shift+Enter', desc: t('cmd.hotkeySendOrNewline') },
+                { keys: 'Ctrl+Enter', desc: t('cmd.hotkeySendAlt') },
+                { keys: 'Backspace', desc: t('cmd.hotkeyClearPrefix') },
+                { keys: 'Esc', desc: t('cmd.hotkeyCloseOverlay') },
+              ],
+            },
+          ],
         });
         return;
       }

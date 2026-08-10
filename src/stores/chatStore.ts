@@ -68,7 +68,7 @@ export interface ChatMessage {
   // File attachments (user-sent images/files)
   attachments?: MessageAttachment[];
   // Command feedback fields (for system messages from slash commands)
-  commandType?: 'mode' | 'model-switch' | 'info' | 'help' | 'action' | 'error' | 'processing';
+  commandType?: 'mode' | 'model-switch' | 'info' | 'help' | 'hotkey' | 'action' | 'error' | 'processing';
   commandData?: Record<string, any>;
   // Command processing card fields
   commandStartTime?: number;

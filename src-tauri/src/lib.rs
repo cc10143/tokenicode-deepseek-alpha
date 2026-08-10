@@ -5875,7 +5875,7 @@ async fn list_all_commands(cwd: Option<String>, additional_dirs: Option<Vec<Stri
 
     // 1. Built-in commands: (name, description, has_args, execution)
     // execution: "ui" = handled in frontend, "cli" = run as separate CLI process, "session" = needs active CLI session
-    let builtins: [(&str, &str, bool, &str); 24] = [
+    let builtins: [(&str, &str, bool, &str); 25] = [
         ("/ask", "Ask a question without making changes", false, "ui"),
         ("/bug", "Report a bug with Claude Code", false, "ui"),
         (
@@ -5907,6 +5907,7 @@ async fn list_all_commands(cwd: Option<String>, additional_dirs: Option<Vec<Stri
         ),
         ("/export", "Export conversation to markdown", true, "ui"),
         ("/help", "Show available commands", false, "ui"),
+        ("/hotkey", "Show keyboard shortcuts", false, "ui"),
         (
             "/init",
             "Initialize project configuration",

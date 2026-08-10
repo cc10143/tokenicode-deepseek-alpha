@@ -38,7 +38,8 @@
 - **assistant 消息 id 对齐**：历史加载与实时流式的 assistant 文本/思考消息 id 统一为 `${uuid}_text_N` / `${uuid}_thinking_N`（N 为 content 数组原始下标）。此前加载历史用裸 `uuid`、流式用带下标格式，两套规则让按 id 去重被绕过；统一后任何"把 JSONL 记录补发给前端"的路径都能被去重兜住。附带契约测试锁定 id 规则。
 - **Ctx 上下文占用恢复（CLI 2.1.195 兼容）**：CLI 2.1.195 的 stream-json 输出中 `message_start` 事件 usage 全为 0，真实 usage 只在 `result`。本 fork 从 `result` 事件恢复 `contextInputTokens` 快照，并让打开历史会话（命中内存缓存）与 App 重启 reconnect 时从会话 JSONL 回填上下文占用——修复"打开历史会话 Ctx 一直显示 0%，/compact 后才正常"。
 - **品牌化自定义标题栏**：窗口改为无边框（`decorations: false`）由前端自绘 36px 标题栏（最小化 / 最大化-还原 / 关闭按钮 + 拖拽区），配色跟随 GUI 主题；启动时 `visible: false` 隐藏窗口，React 首帧后显示（Rust 侧 6s 兜底），避免无边框窗口白屏闪窗。
-- **品牌化关闭确认对话框**：窗口关闭确认由原生 MessageBox 改为复用 `ConfirmDialog`（danger 变体）——React 状态驱动渲染、portal 到 body 经 CSS 级联自动跟随 GUI 主题（浅色/深色 + accent + 背景皮肤），确认后走 `exit(0)`，带防重入 guard 不重复弹窗。
+- **品牌化关闭确认对话框**：窗口关闭确认由原生 MessageBox 改为复用 `ConfirmDialog`（danger 变体）——React 状态驱动渲染、portal 到圆角容器（`.gradient-bg`）经 CSS 级联自动跟随 GUI 主题（浅色/深色 + accent + 背景皮肤），确认后走 `exit(0)`，带防重入 guard 不重复弹窗。
+- **透明圆角窗口**：窗口 `transparent: true` + `shadow: false`——Windows 无边框窗口保留的 9px 黑色 resize 边距被透明窗口根除（`shadow: false` 是去黑框关键，否则透明 + 默认 shadow 产生黑框），窗口 rect 与内容一致不再被撑大；前端 `gradient-bg` 22px 圆角容器外的 4 角透出桌面壁纸（真正圆角边缘）；最大化时圆角归零填应用背景；ConfirmDialog 遮罩 portal 到圆角容器内不溢出圆角。
 
 ### v1.0.6
 

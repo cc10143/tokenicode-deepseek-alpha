@@ -265,3 +265,23 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：tsc 干净、vitest 22/22、vite build 通过（bundle `index-QiRJCoq8.js`）、cargo release build 通过（3 个既有 dead_code warning）、exe 嵌入新 bundle（二进制 grep 确认）、便携版已覆盖。
 
 **issue**：[#12](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/12)
+
+## 2026-08-10 透明圆角窗口（transparent + shadow:false，issue #14）
+
+**背景**：用户反馈"UI 外边黑框框，外框比原来还大"。实测：无边框窗口（`decorations:false`）Windows **强制保留 9px resize 边距**（`GetWindowRect` 比 client 大 9px），移除系统边框后被窗口黑色背景刷渲染成 **9px 纯黑实心框（RGB 0,0,0）**。之前 #13 的无边框路线（strip_system_frame + 自绘 ResizeHandles）走了弯路——9px 是系统管理删不掉，还引入 resize 权限缺失、最大化盖任务栏、WebView2 重设样式等一串问题，**已 revert**（`0b9eef3`/`d6ec970`），换 transparent 方案。
+
+**方案（transparent 透明窗口，绕开 9px）**：
+1. `tauri.conf.json` 窗口加 `"transparent": true` + `"shadow": false`——**`shadow:false` 是去黑框根因**（Tauri v2 默认 `shadow:true`，透明窗口 + shadow 产生黑框，tauri issue #13176）；`transparent` 让窗口 `GetWindowRect == client`（nonClient 全 0），9px 边距根除
+2. `App.css`：body `background: transparent`（gradient-bg 圆角容器外的 4 角透桌面）+ `.gradient-bg.is-maximized` 圆角归零（最大化时 4 角填应用背景不透桌面）
+3. `AppShell.tsx`：监听 `isMaximized`（`win.isMaximized()` + `onResized`），根容器加 `.is-maximized`
+4. `ConfirmDialog.tsx`：portal 从 `document.body` 改 `.gradient-bg`——body 透明后 portal 到 body 的遮罩会溢出圆角（tauri 已知坑：modal 必须 portal 到圆角容器内，issue #9287）
+
+**关键事实**：
+- transparent 窗口 restore 态 `GetWindowRect == client`；最大化时 `GetWindowRect` 含 9px DWM 边距（截图需从 client origin），但 **client 自动正好填工作区（2560x1390）不盖任务栏**，无需 #13 的 clamp
+- 透明窗口 + `shadow:false` 无 DWM 阴影（接受，或前端补 box-shadow）
+- 右键菜单（SessionContextMenu/FileExplorer）仍 portal body（小浮层在窗口内无影响，未改避免 overflow clip 风险）
+- 桌面壁纸是深色时 4 角透出看着像黑角，换壁纸会变——这是透明圆角标准效果，非黑框
+
+**验证**：rect==client 1600x1000（9px 黑框消失、窗口回配置尺寸）；圆角 4 角透桌面；最大化 client 2560x1390 + 4 角圆角归零填应用背景；ConfirmDialog 遮罩 + 居中正常不溢出圆角。用户目视确认效果 OK。
+
+**issue**：[#14](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/14)

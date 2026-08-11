@@ -41,7 +41,7 @@
 - **品牌化关闭确认对话框**：窗口关闭确认由原生 MessageBox 改为复用 `ConfirmDialog`（danger 变体）——React 状态驱动渲染、portal 到圆角容器（`.gradient-bg`）经 CSS 级联自动跟随 GUI 主题（浅色/深色 + accent + 背景皮肤），确认后走 `exit(0)`，带防重入 guard 不重复弹窗。
 - **透明圆角窗口**：窗口 `transparent: true` + `shadow: false`——Windows 无边框窗口保留的 9px 黑色 resize 边距被透明窗口根除（`shadow: false` 是去黑框关键，否则透明 + 默认 shadow 产生黑框），窗口 rect 与内容一致不再被撑大；前端 `gradient-bg` 22px 圆角容器外的 4 角透出桌面壁纸（真正圆角边缘）；最大化时圆角归零填应用背景；ConfirmDialog 遮罩 portal 到圆角容器内不溢出圆角。
 - **compact 确认链路根治**：`/compact` 卡「正在执行」永久不完成的问题（Windows 块缓冲吞掉压缩成功确认 + CLI 错误文本不解析 + 命令卡关联竞争）三层根治：① watchdog 从 JSONL 兜底补发 `compact_boundary`（只补发本次 spawn 之后的，手动解析 RFC3339 时间戳过滤历史）——压缩成功但确认被吞时不再 60s 超时误判失败；② 解析 `local_command` 文本——`Not enough messages to compact` 终止 auto 重试、`Error during compaction` 明确标失败；③ `pendingCompactCmdIds` 数组批量标完成全部 compact 命令卡，auto 与手动不再互相覆盖。
-- **Esc / 停止按钮 interrupt 优雅打断**：停止按钮不再 `killSession`（杀进程丢上下文），改为发送 SDK `interrupt` control_request——CLI 进程存活、会话上下文保留，打断后可同会话继续 follow-up。支持双入口：停止按钮 + 全局 `Esc` 键（浮层优先级——命令面板开着时 Esc 先关面板，任务/代理/设置面板开着时不打断；斜杠浮层开着时 Esc 只关浮层）。CLI 对打断回合返回的 `result` 被识别为优雅停止而非错误态；打断后 3 秒内未收到确认自动降级为 kill，防止会话悬挂。
+- **Esc / 停止按钮 interrupt 优雅打断**：停止按钮不再 `killSession`（杀进程丢上下文），改为发送 SDK `interrupt` control_request——CLI 进程存活、会话上下文保留，打断后可同会话继续 follow-up。支持双入口：停止按钮 + 全局 `Esc` 键（浮层优先级——命令面板开着时 Esc 先关面板，任务/代理/设置面板开着时不打断；斜杠浮层开着时 Esc 只关浮层）。CLI 对打断回合返回的 `result` 被识别为优雅停止而非错误态；打断后 3 秒内未收到确认自动降级为 kill，防止会话悬挂。修复了「聊天编辑器焦点下按 Esc 无反应」：ProseMirror 对 Escape 无条件 `preventDefault`（`captureKeyDown` keyCode 27），前端 Esc 处理器原先因 `defaultPrevented` 守卫被拦截，现豁免聊天输入框，编辑器焦点下 Esc 可正常打断。
 
 ### v1.0.6
 

@@ -652,9 +652,8 @@ function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      // Skip IME composition cancel (e.g. Chinese pinyin) and events a child
-      // handler already consumed via preventDefault.
-      if (e.isComposing || e.defaultPrevented) return;
+      // Skip IME composition cancel (e.g. Chinese pinyin).
+      if (e.isComposing) return;
       const s = useSettingsStore.getState();
       if (s.commandPaletteOpen) {
         s.setCommandPaletteOpen(false);
@@ -667,6 +666,11 @@ function App() {
       const inChatInput = !!ae?.closest?.('[data-chat-input]');
       const inTextField = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable) && !inChatInput;
       if (inTextField) return;
+      // Skip events a child handler already consumed via preventDefault — EXCEPT
+      // the chat editor: ProseMirror unconditionally preventDefaults Escape
+      // (captureKeyDown, keyCode 27) without doing anything meaningful, so it
+      // must not block interrupt there (issue #19).
+      if (e.defaultPrevented && !inChatInput) return;
       interruptCurrentTurn();
     };
     window.addEventListener('keydown', handler);

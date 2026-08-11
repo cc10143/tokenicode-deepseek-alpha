@@ -355,3 +355,23 @@ forked from mistydew/tokenicode-deepseek-alpha。
 **验证**：tsc 干净、vitest 22/22、vite build 通过、cargo check 干净（3 个既有 dead_code）、cargo test 26 passed、`pnpm tauri build --no-bundle` exit 0。
 
 **issue**：[#18](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/18)
+
+## 2026-08-11 修复：聊天编辑器焦点下 Esc 打断无效（App.tsx）——ProseMirror 硬编码消费 Escape
+
+**问题**：模型思考中按 Esc 无反应，但停止按钮有效（鼠标点击不走键盘路径）。两入口共用 `src/lib/interrupt.ts` 的 `interruptCurrentTurn()`，差异必在 Esc 键盘链路。
+
+**诊断**（devtools capture/bubble 双监听，无需重建——`Cargo.toml` 已启用 `devtools` feature，release 可 F12）：焦点在聊天编辑器（ProseMirror contenteditable）时按 Esc，`bubble.defaultPrevented=true`；焦点在 BODY 空闲态时 `def=false`——**事件在 target 阶段被 preventDefault**。
+
+**根因**：**ProseMirror 本体**（`prosemirror-view@1.41.6`，`dist/index.js:2762`）：
+```js
+else if (code == 13 || code == 27) { // Enter, Esc
+    return true;   // Escape 无条件标记"已处理" → preventDefault()
+}
+```
+`captureKeyDown` 对 keyCode 27 硬编码返回 true → view keydown handler `event.preventDefault()`。Tiptap 核心/全部扩展/`@tiptap/pm` 逐包 grep 均无 Escape 绑定，是 ProseMirror 通用行为（编辑器焦点下 Esc 一律被消费）。App handler 的 `e.defaultPrevented` 守卫（issue #19 设计用于跳过"子组件已消费"的 Esc）把 interrupt 拦下。
+
+**修复**（`src/App.tsx`）：`defaultPrevented` 守卫从 handler 开头移到 focus 判定之后，改 `if (e.defaultPrevented && !inChatInput) return;`——聊天编辑器被无意义 preventDefault 时不阻塞 interrupt。其余语义不变：斜杠浮层 Esc 走 InputBar `stopPropagation` 阻断（不达 window）；非聊天输入框由 focus 守卫处理；命令面板/任务/代理/设置面板由 panel 守卫处理。
+
+**验证**：tsc 干净、vitest 22/22、vite build 通过、cargo release 构建通过（3 个既有 dead_code warning；末尾签名失败是既有问题——缺 `TAURI_SIGNING_PRIVATE_KEY`，不影响 exe）。便携版已覆盖（SHA256 `5b14a6af…`）。
+
+**issue**：[#19](https://github.com/cc10143/tokenicode-deepseek-alpha/issues/19)
